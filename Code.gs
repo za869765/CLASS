@@ -4846,6 +4846,280 @@ function autoValidateSchedule(sheetName) {
     return { success: false, checks: [], error: e.message };
   }
 }
+// =============================================
+// 全年模擬驗證 — simulateFullYearValidation
+// 逐月執行 dryRun 排班，接著對結果跑 4 項自檢邏輯，
+// 回傳每月是否通過及詳細錯誤清單。
+// 對已有資料的月份直接讀 sheet；未排班月份執行 dryRun。
+// =============================================
+function simulateFullYearValidation(adminPassword) {
+  const spreadsheet = getSpreadsheet();
+  const tz = spreadsheet.getSpreadsheetTimeZone();
+  const rocMonths = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
+  const year = 2026;
+
+  // 讀設定表名單
+  const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
+  const dutyOrder  = settingSheet.getRange('E1:E11').getValues().flat().map(String).filter(n=>n.trim());
+  const dengOrder  = settingSheet.getRange('B1:B11').getValues().flat().map(String).filter(n=>n.trim());
+  const kkOrder    = settingSheet.getRange('J1:J3').getValues().flat().map(String).filter(n=>n.trim());
+  const nurseNames = settingSheet.getRange('K1:K8').getValues().flat().map(String).filter(n=>n.trim());
+  const dutyNames  = settingSheet.getRange('E1:E11').getValues().flat().map(String).filter(n=>n.trim());
+  const dengNames  = settingSheet.getRange('B1:B11').getValues().flat().map(String).filter(n=>n.trim());
+
+  function parseRawDate(raw, yr, mn) {
+    if (!raw) return null;
+    if (raw instanceof Date) return raw;
+    const mm = raw.toString().trim().match(/(\d+)\/(\d+)/);
+    if (mm) { try { return new Date(yr, parseInt(mm[1])-1, parseInt(mm[2])); } catch(e){} }
+    return null;
+  }
+
+  const monthResults = [];
+  // prevSummary 記錄上月末位（模擬月使用，已排月份從 sheet 讀）
+  let prevSummary = null;
+
+  for (let month = 1; month <= 12; month++) {
+    const sheetName = rocNumToStr(year - 1911) + '年' + rocMonths[month] + '月班表';
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    const mres = { month, sheetName, source: '', pass: false, errors: [] };
+
+    if (!sheet) {
+      mres.source = 'no_sheet';
+      mres.pass = null;
+      mres.errors.push('工作表不存在，跳過');
+      monthResults.push(mres);
+      prevSummary = null;
+      continue;
+    }
+
+    // 判斷是否已有排班資料
+    const rawSheet = sheet.getRange('A2:M32').getValues();
+    const hasData  = rawSheet.some(r => (r[2]||'').toString().trim() || (r[12]||'').toString().trim());
+
+    // 建立 curRows（統一格式 {date,ds,isHol,duty,kk,deng,rawIdx}）
+    let curRows = [];
+    // clinic raw data（用於 Check 4）：array of rows, 每 row index 對應欄位
+    // existing → rawSheet[r][4..10] = E..K；dryRun → preview[r][2..8] = colIdx 2..8
+    let clinicSource = null;
+    let clinicIsRaw  = true; // true=rawSheet(index需+0), false=preview(colIdx直接用)
+
+    if (hasData) {
+      mres.source = 'existing';
+      rawSheet.forEach((r, ri) => {
+        const d = parseRawDate(r[0], year, month);
+        if (!d) return;
+        curRows.push({
+          date: d,
+          ds:   Utilities.formatDate(d, tz, 'M/d'),
+          isHol: isHoliday(d),
+          duty: (r[2]||'').toString().trim(),
+          kk:   (r[3]||'').toString().trim(),
+          deng: (r[12]||'').toString().trim(),
+          rawRow: r
+        });
+      });
+      clinicSource = rawSheet;
+      clinicIsRaw  = true;
+
+    } else if (adminPassword) {
+      mres.source = 'dry_run';
+      const dr = runAutoSchedule(sheetName, adminPassword, { overwrite: true, sendNotify: false, dryRun: true });
+      if (!dr.success) {
+        mres.errors.push('dryRun失敗: ' + dr.message);
+        mres.pass = false;
+        monthResults.push(mres);
+        prevSummary = null;
+        continue;
+      }
+      // dr.dates = array of [dateStr] (from combinedDates.map(d=>[d]))
+      // dr.preview = array of rowRes[0..10]
+      for (let r = 0; r < dr.preview.length; r++) {
+        const dateStr = Array.isArray(dr.dates[r]) ? dr.dates[r][0] : (dr.dates[r]||'');
+        if (!dateStr || !dateStr.trim()) continue;
+        const mm = dateStr.match(/(\d+)\/(\d+)/);
+        if (!mm) continue;
+        let d; try { d = new Date(year, parseInt(mm[1])-1, parseInt(mm[2])); } catch(e){ continue; }
+        const row = dr.preview[r];
+        curRows.push({
+          date: d,
+          ds:   mm[1]+'/'+parseInt(mm[2]),
+          isHol: isHoliday(d),
+          duty: (row[0]||'').toString().trim(),   // colIdx 0
+          kk:   (row[1]||'').toString().trim(),   // colIdx 1
+          deng: (row[10]||'').toString().trim(),  // colIdx 10
+          rawRow: row
+        });
+      }
+      clinicSource = dr.preview;
+      clinicIsRaw  = false; // preview 索引 0-10 = colIdx
+
+    } else {
+      mres.source = 'no_data';
+      mres.pass = null;
+      mres.errors.push('無排班資料且未提供密碼，跳過');
+      monthResults.push(mres);
+      prevSummary = null;
+      continue;
+    }
+
+    const errors = [];
+
+    // ── Check 1：跨月輪序接續 ──────────────────────────────────────────
+    // 上月末位：若 prevSummary 存在（上月為 dryRun）用 prevSummary；否則讀 sheet
+    let prevLastWdDuty='', prevLastHolDuty='', prevLastWdDeng='', prevLastHolDeng='', prevLastWdKk='';
+
+    if (month > 1 && prevSummary) {
+      prevLastWdDuty  = prevSummary.lastWdDuty;
+      prevLastHolDuty = prevSummary.lastHolDuty;
+      prevLastWdDeng  = prevSummary.lastWdDeng;
+      prevLastHolDeng = prevSummary.lastHolDeng;
+      prevLastWdKk    = prevSummary.lastWdKk;
+    } else if (month > 1) {
+      const prevM = month - 1;
+      const prevSN = rocNumToStr(year - 1911) + '年' + rocMonths[prevM] + '月班表';
+      const prevSh = spreadsheet.getSheetByName(prevSN);
+      if (prevSh) {
+        prevSh.getRange('A2:M32').getValues().forEach(r => {
+          const d = parseRawDate(r[0], year, prevM);
+          if (!d) return;
+          const isHol = isHoliday(d);
+          const duty = (r[2]||'').toString().trim();
+          const kk   = (r[3]||'').toString().trim();
+          const deng = (r[12]||'').toString().trim();
+          if (isHol) { if(duty) prevLastHolDuty=duty; if(deng) prevLastHolDeng=deng; }
+          else       { if(duty) prevLastWdDuty=duty;  if(deng) prevLastWdDeng=deng; if(kk) prevLastWdKk=kk; }
+        });
+      }
+    }
+
+    const chkCont = (label, order, prev, cur) => {
+      if (!order.length || !prev || !cur) return;
+      const pi = order.indexOf(prev), ci2 = order.indexOf(cur);
+      if (pi === -1 || ci2 === -1) return;
+      const exp = (pi + 1) % order.length;
+      if (ci2 !== exp) errors.push(`[C1] 【${label}】上月末「${prev}」→應接「${order[exp]}」，實際「${cur}」`);
+    };
+    const curFirstWdDuty  = (curRows.find(r=>!r.isHol&&r.duty)||{}).duty||'';
+    const curFirstHolDuty = (curRows.find(r=> r.isHol&&r.duty)||{}).duty||'';
+    const curFirstWdDeng  = (curRows.find(r=>!r.isHol&&r.deng)||{}).deng||'';
+    const curFirstHolDeng = (curRows.find(r=> r.isHol&&r.deng)||{}).deng||'';
+    const curFirstWdKk    = (curRows.find(r=>!r.isHol&&r.kk)||{}).kk||'';
+    chkCont('平日值班',    dutyOrder, prevLastWdDuty,  curFirstWdDuty);
+    chkCont('假日值班',    dutyOrder, prevLastHolDuty, curFirstHolDuty);
+    chkCont('平日停班2線', dengOrder, prevLastWdDeng,  curFirstWdDeng);
+    chkCont('假日停班2線', dengOrder, prevLastHolDeng, curFirstHolDeng);
+    if (kkOrder.length) chkCont('平日協助掛號', kkOrder, prevLastWdKk, curFirstWdKk);
+
+    // ── Check 2：連續同人 ──────────────────────────────────────────────
+    const wdRows  = curRows.filter(r=>!r.isHol);
+    const holRows = curRows.filter(r=> r.isHol);
+    const chkConsec = (label, rows, field) => {
+      let pv = '';
+      rows.forEach((r,i) => {
+        const val = r[field];
+        if (val && val === pv) errors.push(`[C2] 【${label}連續】${r.ds} 與前日（${rows[i-1].ds}）均為「${val}」`);
+        if (val) pv = val;
+      });
+    };
+    chkConsec('平日值班',    wdRows,  'duty');
+    chkConsec('假日值班',    holRows, 'duty');
+    chkConsec('平日停班2線', wdRows,  'deng');
+    chkConsec('假日停班2線', holRows, 'deng');
+
+    // ── Check 3：值班 = 停班2線 衝突 ──────────────────────────────────
+    curRows.forEach(r => {
+      if (r.duty && r.deng && r.duty === r.deng)
+        errors.push(`[C3] 【衝突】${r.ds}（${r.isHol?'假':'平'}）值班=停班2線=「${r.duty}」`);
+    });
+
+    // ── Check 4（修正版）：公平度，門診合計用正確欄位 E~K ─────────────
+    const clinicTotal = {}; nurseNames.forEach(n=>{ clinicTotal[n]=0; });
+    const dutyWd={}, dutyHol={}; dutyNames.forEach(n=>{ dutyWd[n]=0; dutyHol[n]=0; });
+    const dengWd={}, dengHol={}; dengNames.forEach(n=>{ dengWd[n]=0; dengHol[n]=0; });
+
+    curRows.forEach(r => {
+      if (r.duty) { if(r.isHol){ if(dutyHol[r.duty]!==undefined) dutyHol[r.duty]++; }
+                    else        { if(dutyWd[r.duty]!==undefined)  dutyWd[r.duty]++; } }
+      if (r.deng) { if(r.isHol){ if(dengHol[r.deng]!==undefined) dengHol[r.deng]++; }
+                    else        { if(dengWd[r.deng]!==undefined)  dengWd[r.deng]++; } }
+    });
+
+    // 門診合計：根據資料來源決定正確 index
+    if (clinicSource) {
+      clinicSource.forEach(row => {
+        if (!row) return;
+        if (clinicIsRaw) {
+          // rawSheet: A2:M32 → index 4(E)..10(K) = colIdx 2..8
+          for (let idx=4; idx<=10; idx++) {
+            const nm = (row[idx]||'').toString().trim();
+            if (nm && clinicTotal[nm]!==undefined) clinicTotal[nm]++;
+          }
+        } else {
+          // dryRun preview: index 0..10 = colIdx 0..10 → colIdx 2..8 = 門診系列
+          for (let ci=2; ci<=8; ci++) {
+            const nm = (row[ci]||'').toString().trim();
+            if (nm && clinicTotal[nm]!==undefined) clinicTotal[nm]++;
+          }
+        }
+      });
+    }
+
+    const fairT = (label, map, maxAllowed) => {
+      const active = Object.entries(map);
+      if (active.length < 2) return;
+      const vals = active.map(([,v])=>v);
+      const mx = Math.max(...vals), mn2 = Math.min(...vals);
+      if (mx - mn2 > maxAllowed * 2) {
+        const mxN = active.find(([,v])=>v===mx)[0];
+        const mnN = active.find(([,v])=>v===mn2)[0];
+        errors.push(`[C4] 【${label}】${mxN}:${mx}次 vs ${mnN}:${mn2}次，差${mx-mn2}（允許±${maxAllowed}）`);
+      }
+    };
+    fairT('門診合計',   clinicTotal, 2);
+    fairT('值班平日',   dutyWd,      1);
+    fairT('值班假日',   dutyHol,     1);
+    fairT('停班2線平日', dengWd,     2);
+    fairT('停班2線假日', dengHol,    2);
+
+    // ── 額外偵測：停班2線空白（BUG 2 symptom）─────────────────────────
+    curRows.forEach(r => {
+      if (!r.deng) errors.push(`[B2] 停班2線空白: ${r.ds}（${r.isHol?'假':'平'}）`);
+      if (!r.duty) errors.push(`[DUTY] 值班空白: ${r.ds}`);
+    });
+
+    mres.errors = errors;
+    mres.pass = errors.length === 0;
+
+    // 記錄本月末位供下月 Check 1 使用
+    let lwDuty='', lhDuty='', lwDeng='', lhDeng='', lwKk='';
+    curRows.forEach(r => {
+      if (r.isHol) { if(r.duty) lhDuty=r.duty; if(r.deng) lhDeng=r.deng; }
+      else         { if(r.duty) lwDuty=r.duty;  if(r.deng) lwDeng=r.deng; if(r.kk) lwKk=r.kk; }
+    });
+    prevSummary = { lastWdDuty:lwDuty, lastHolDuty:lhDuty, lastWdDeng:lwDeng, lastHolDeng:lhDeng, lastWdKk:lwKk };
+    monthResults.push(mres);
+  }
+
+  // 整理摘要
+  const passCount = monthResults.filter(r=>r.pass===true).length;
+  const failCount = monthResults.filter(r=>r.pass===false && r.source !== 'no_sheet' && r.source !== 'no_data').length;
+  const lines = [];
+  lines.push(`=== 115年全年排班自檢模擬結果 ===`);
+  lines.push(`通過: ${passCount} 月 | 不通過: ${failCount} 月`);
+  lines.push('');
+  monthResults.forEach(r => {
+    const tag = r.pass===true ? '✅' : r.pass===false ? '❌' : '⚠️';
+    lines.push(`${tag} ${r.month}月（${r.sheetName}）[${r.source}]`);
+    if (r.errors.length > 0) {
+      r.errors.forEach(e => lines.push('   ' + e));
+    }
+  });
+
+  Logger.log(lines.join('\n'));
+  return { success: true, summary: monthResults, report: lines.join('\n') };
+}
+
 // ── 排班星期規則設定 ────────────────────────────────────────────────────
 // 儲存在「班表設定」工作表 N3:N13（每格一個 colIdx 1-10 的規則字串）
 // 格式：colIdx|day1,day2  例如 "8|2" 表示 注射2 只排週二
