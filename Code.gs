@@ -743,6 +743,25 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
     const oldShift = sheet.getRange(row, shiftColumn).getValue();
     const newShift = newShifts.join(', ');
     if (oldShift === newShift) return '班別未改變，無需更新。';
+
+    // BUG 8 修正：驗證換班者身份 — empId 必須對應到「原班別人員」或有效員工
+    // 非管理員操作時，只允許換自己的班（empId 對應的姓名必須是 oldShift）
+    if (empId) {
+      const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
+      const names  = settingSheet.getRange('I1:I11').getValues().flat().map(n => n ? n.toString().trim() : '');
+      const empIds = settingSheet.getRange('M1:M11').getValues().flat().map(n => n ? n.toString().trim() : '');
+      const pwCell = settingSheet.getRange('N2').getValue();
+      const isAdmin = (empId === (pwCell ? pwCell.toString().trim() : ''));
+      if (!isAdmin) {
+        const empIdx = empIds.indexOf(empId.toString().trim());
+        const staffName = empIdx !== -1 ? names[empIdx] : '';
+        const oldShiftStr = oldShift ? oldShift.toString().trim() : '';
+        if (staffName && oldShiftStr && staffName !== oldShiftStr) {
+          return '⚠️ 只能申請更換自己的班次（您的姓名：' + staffName + '，原班別：' + oldShiftStr + '）';
+        }
+      }
+    }
+
     sheet.getRange(row, shiftColumn).setValue(newShift);
     const headers = sheet.getRange('C1:M1').getValues()[0];
     const shiftType = headers[shiftColumn - 3] || '未知班別';
@@ -1863,15 +1882,30 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         const hdrs = sh.getRange('C1:M1').getValues()[0].map(h => h.toString().trim());
 
         logs.forEach(log => {
-          const s = log.toString();
-          const m = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
-          if (!m) return;
-          const [, date, shiftType, oldVal] = m;
-          const ci = hdrs.indexOf(shiftType);
-          if (ci === -1) return;
-          const key = date + '|' + ci;
-          // 最早一筆的 oldVal 才是原始排班人（若多次換班取第一次）
-          if (!origMap[key]) origMap[key] = oldVal;
+          const s = log.toString().trim();
+
+          // ── 格式1：一般換班日誌 ──
+          const m1 = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
+          if (m1) {
+            const [, date, shiftType, oldVal] = m1;
+            const ci = hdrs.indexOf(shiftType);
+            if (ci !== -1) {
+              const key = date + '|' + ci;
+              if (!origMap[key]) origMap[key] = oldVal;
+            }
+            return;
+          }
+
+          // ── 格式2：拖曳日誌（排班-/審核-）── 同 BUG 15 修正
+          const m2 = s.match(/^(?:排班|審核)-.+?\s+(\d+\/\d+)\s+(.+?)\s+原(.+?)→新(.+?)\s+更換時間:/);
+          if (m2) {
+            const [, date, shiftType, oldVal] = m2;
+            const ci = hdrs.indexOf(shiftType);
+            if (ci !== -1) {
+              const key = date + '|' + ci;
+              if (!origMap[key]) origMap[key] = oldVal;
+            }
+          }
         });
       } catch(e) {}
       return origMap;
