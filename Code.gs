@@ -331,26 +331,7 @@ function createScheduleSheet(adminPassword, year, month, sheetName) {
 // =============================================
 // 批次建立：下個月到115年12月
 // =============================================
-function createYearlySheets(adminPassword, namePattern) {
-  if (!verifyAdminPassword(adminPassword)) return { success: false, results: [], summary: '管理員密碼錯誤。' };
-  const rocMonthNames = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
-  const now = new Date();
-  const startMonth = now.getMonth() + 2 > 12 ? 1 : now.getMonth() + 2;
-  const startYear  = now.getMonth() + 2 > 12 ? now.getFullYear() + 1 : now.getFullYear();
-  const results = []; let ok = 0, skip = 0;
-  let y = startYear, m = startMonth;
-  while (y < 2026 || (y === 2026 && m <= 12)) {
-    const rocYear = y - 1911;
-    const name = (namePattern || '一百一十五年{rm}月班表')
-      .replace('{m}', m).replace('{rm}', rocMonthNames[m])
-      .replace('{y}', y).replace('{ry}', rocYear);
-    const res = createScheduleSheet(adminPassword, y, m, name);
-    results.push({ month: m, year: y, sheetName: name, status: res.success?'ok':'skip', message: res.message });
-    if (res.success) ok++; else skip++;
-    if (m === 12) { y++; m = 1; } else { m++; }
-  }
-  return { success: true, summary: '建立完成！成功 '+ok+' 個月、跳過（已存在）'+skip+' 個月。', results };
-}
+// createYearlySheets 已移除（整年排班功能已簡化為單月連排，不再需要）
 
 // =============================================
 // 原有功能
@@ -1416,43 +1397,15 @@ function getYearlyClinicStats() {
   }
 }
 
-// ── 一鍵排班：建立工作表 + 自動排班（整合） ──────────────────────
+// ── 一鍵排班：建立工作表 + 自動排班（單月）──────────────────────
 // mode: 'preview' | 'execute'
-// scope: 'full' | 'month'
-// month: sheetName (scope='month' 時使用)
+// month: sheetName（工作表名稱）
+// targetYear: 西元年（如 2026），預設用當年
 function quickSchedule(adminPassword, mode, scope, month, targetYear) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    // 支援跨年度：targetYear 為西元年（如 2027），預設用當年
-    const useYear  = targetYear ? Number(targetYear) : new Date().getFullYear();
-    const useRocY  = useYear - 1911;
-    const rocPfx   = rocNumToStr(useRocY);
-    const namePattern = rocPfx + '年{rm}月班表';
     const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
-
-    if (scope === 'full') {
-      createYearlySheets(adminPassword, namePattern);
-      if (mode === 'preview') {
-        const r = previewFullYear(adminPassword, useYear);
-        let hasData = false;
-        if (r.results) {
-          r.results.forEach(function(res) {
-            if (res.sheetName || res.label) {
-              const sn = res.sheetName || res.label;
-              const sh = spreadsheet.getSheetByName(sn);
-              if (sh) {
-                const vals = sh.getRange('C2:M10').getValues().flat();
-                if (vals.some(function(v){ return v && v.toString().trim(); })) hasData = true;
-              }
-            }
-          });
-        }
-        r.hasData = hasData;
-        return r;
-      } else {
-        return autoScheduleFullYear(adminPassword, { overwrite: true, sendNotify: false, targetYear: useYear });
-      }
-    } else {
+    {
       // 單月：若工作表不存在先建立
       if (!spreadsheet.getSheetByName(month)) {
         const p = parseYearMonthFromSheetName(month);
@@ -2791,123 +2744,8 @@ function getScheduleDates(sheetName) {
 // 一鍵排整年：115年4月～12月
 // =============================================
 
-function getYearlyScheduleSheets(targetYear) {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
-  const allSheetNames = spreadsheet.getSheets().map(s => s.getName());
-  const now = new Date();
-  const useYear = targetYear ? Number(targetYear) : now.getFullYear();
-  // 整年範圍：目標年1月～12月（若是當年則從下個月開始）
-  const isSameYear = (useYear === now.getFullYear());
-  const startMonth = isSameYear ? (now.getMonth() + 2 > 12 ? 1 : now.getMonth() + 2) : 1;
-  const startYear  = (isSameYear && now.getMonth() + 2 > 12) ? useYear + 1 : useYear;
-  const targets = [];
-  let y = startYear, m = startMonth;
-  while (y < useYear || (y === useYear && m <= 12)) {
-    const matched = allSheetNames.find(name => {
-      if (name === EMAIL_SHEET_NAME) return false;
-      const ym = parseYearMonthFromSheetName(name);
-      return ym.year === y && ym.month === m;
-    });
-    targets.push({ year: y, month: m, sheetName: matched || null });
-    if (m === 12) { y++; m = 1; } else { m++; }
-  }
-  return targets;
-}
-
-function autoScheduleFullYear(adminPassword, options) {
-  if (!verifyAdminPassword(adminPassword)) {
-    return { success: false, summary: '管理員密碼錯誤。', results: [] };
-  }
-  const targetYear = options && options.targetYear ? Number(options.targetYear) : new Date().getFullYear();
-  const rocY = targetYear - 1911;
-  const targets = getYearlyScheduleSheets(targetYear);
-  const results = [];
-  let successCount = 0, skipCount = 0, failCount = 0;
-
-  for (const target of targets) {
-    const monthLabel = `${rocY}年${target.month}月`;
-    if (!target.sheetName) {
-      // 嘗試自動建立工作表
-      const rocPfx = rocNumToStr(rocY);
-      const rocMonthNames = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
-      const autoSheetName = rocPfx + '年' + rocMonthNames[target.month] + '月班表';
-      try {
-        createScheduleSheet(adminPassword, target.year, target.month, autoSheetName);
-        target.sheetName = autoSheetName;
-      } catch(ce) {
-        results.push({ month: target.month, label: monthLabel, sheetName: null, status: 'skip',
-          message: `找不到「${monthLabel}」對應工作表且無法自動建立，跳過。` });
-        skipCount++;
-        continue;
-      }
-    }
-    try {
-      const res = runAutoSchedule(target.sheetName, adminPassword, {
-        overwrite: options.overwrite || false,
-        sendNotify: false,
-        dryRun: false
-      });
-      if (res.success) {
-        results.push({ month: target.month, label: monthLabel, sheetName: target.sheetName,
-          status: 'ok', message: `✅ ${monthLabel} 排班完成` });
-        successCount++;
-      } else {
-        results.push({ month: target.month, label: monthLabel, sheetName: target.sheetName,
-          status: 'fail', message: `❌ ${monthLabel} 失敗：${res.message}` });
-        failCount++;
-      }
-    } catch(e) {
-      results.push({ month: target.month, label: monthLabel, sheetName: target.sheetName,
-        status: 'fail', message: `❌ ${monthLabel} 例外：${e.message}` });
-      failCount++;
-    }
-  }
-
-  if (options.sendNotify && successCount > 0) {
-    try {
-      const staff = getStaffList();
-      const emails = staff.map(s => s.email).filter(e => e && e.includes('@'));
-      if (emails.length > 0) {
-        MailApp.sendEmail({
-          to: emails.slice(0, 50).join(','),
-          subject: `班表通知：${rocY}年整年自動排班已完成`,
-          body: `115年4月至12月班表已完成自動排班。\n\n成功：${successCount} 個月　跳過：${skipCount} 個月　失敗：${failCount} 個月\n\n排班時間：${new Date().toLocaleString()}\n\n請登入系統確認各月份班表內容。\n\n此為系統自動發送的通知信件。`,
-          name: '班表管理系統'
-        });
-      }
-    } catch(e) { logError('整年排班通知寄送失敗: ' + e.message); }
-  }
-
-  const summary = `完成！成功 ${successCount} 個月、跳過 ${skipCount} 個月、失敗 ${failCount} 個月。`;
-  writeOpLog('整年排班', summary);
-  return { success: failCount === 0, summary, results };
-}
-
-function previewFullYear(adminPassword, targetYear) {
-  if (!verifyAdminPassword(adminPassword)) {
-    return { success: false, summary: '管理員密碼錯誤。', results: [] };
-  }
-  const useYear = targetYear ? Number(targetYear) : new Date().getFullYear();
-  const rocY    = useYear - 1911;
-  const targets = getYearlyScheduleSheets(useYear);
-  const results = [];
-  for (const target of targets) {
-    const monthLabel = `${rocY}年${target.month}月`;
-    if (!target.sheetName) {
-      results.push({ month: target.month, label: monthLabel, sheetName: null, status: 'skip', preview: [] });
-      continue;
-    }
-    const res = runAutoSchedule(target.sheetName, adminPassword, {
-      overwrite: true, sendNotify: false, dryRun: true
-    });
-    results.push({
-      month: target.month, label: monthLabel, sheetName: target.sheetName,
-      status: res.success ? 'ok' : 'fail', message: res.message,
-      dates: res.dates || [], headers: res.headers || [], preview: res.preview || []
-    });
-  }
-  return { success: true, summary: `預覽完成，共 ${results.length} 個月`, results };
-}
+// getYearlyScheduleSheets / autoScheduleFullYear / previewFullYear 已移除
+// （整年排班功能已移除，統一使用單月排班）
 
 // =============================================
 // 職務統計看板
@@ -5142,16 +4980,14 @@ function simulateFullYearValidation(adminPassword) {
 }
 
 // =============================================
-// 排班一致性 + 自檢完整測試
+// 排班一致性 + 自檢完整測試（單月連排版）
 // runScheduleConsistencyTest(adminPassword)
 //
 // 測試項目：
-//   Phase 1 — 整年排班（overwrite）→ autoValidateSchedule 每月
-//   Phase 2 — 整年排班再跑一次    → 驗算 → 與 Phase 1 比對（重複性）
-//   Phase 3 — 單月連排至 12 月    → 驗算 → 與 Phase 2 比對（方法一致性）
-//   Phase 4 — 單月連排再跑一次    → 驗算 → 與 Phase 3 比對（重複性）
+//   Phase 1 — 單月連排第 1 次 → autoValidateSchedule 全 12 月
+//   Phase 2 — 單月連排第 2 次 → 驗算 → 與 Phase 1 快照比對（重複性）
 //
-// 注意：函式實際寫入試算表，完成後班表為 Phase 4 的結果。
+// 注意：函式實際寫入試算表，完成後班表為 Phase 2 的結果。
 // =============================================
 function runScheduleConsistencyTest(adminPassword) {
   if (!verifyAdminPassword(adminPassword))
@@ -5187,14 +5023,6 @@ function runScheduleConsistencyTest(adminPassword) {
       }
     }
     return diffs;
-  }
-
-  // 執行整年排班（autoScheduleFullYear overwrite）
-  function runFullYear() {
-    Logger.log(`[${ts()}] 整年排班 start`);
-    const r = autoScheduleFullYear(adminPassword, { overwrite: true, sendNotify: false, targetYear: year });
-    Logger.log(`[${ts()}] 整年排班 end — success:${r.success}`);
-    return r;
   }
 
   // 執行單月連排（month 1→12，overwrite）
@@ -5234,32 +5062,18 @@ function runScheduleConsistencyTest(adminPassword) {
   }
 
   // ═══════════════════════════════════════
-  // Phase 1：整年排班第 1 次
+  // Phase 1：單月連排第 1 次
   // ═══════════════════════════════════════
-  runFullYear();
+  runSequential();
   const snap1 = captureAll();
-  const val1  = validateAll('整年-1次');
+  const val1  = validateAll('單月-1次');
 
   // ═══════════════════════════════════════
-  // Phase 2：整年排班第 2 次（重複性驗證）
+  // Phase 2：單月連排第 2 次（重複性驗證）
   // ═══════════════════════════════════════
-  runFullYear();
+  runSequential();
   const snap2 = captureAll();
-  const val2  = validateAll('整年-2次');
-
-  // ═══════════════════════════════════════
-  // Phase 3：單月連排第 1 次
-  // ═══════════════════════════════════════
-  runSequential();
-  const snap3 = captureAll();
-  const val3  = validateAll('單月-1次');
-
-  // ═══════════════════════════════════════
-  // Phase 4：單月連排第 2 次（重複性驗證）
-  // ═══════════════════════════════════════
-  runSequential();
-  const snap4 = captureAll();
-  const val4  = validateAll('單月-2次');
+  const val2  = validateAll('單月-2次');
 
   // ── 比對快照 ──────────────────────────────────────────────────────
   const compare = (snapA, snapB, label) => {
@@ -5271,9 +5085,7 @@ function runScheduleConsistencyTest(adminPassword) {
     return result;
   };
 
-  const cmp_1vs2 = compare(snap1, snap2, '整年排班 第1次 vs 第2次（重複性）');
-  const cmp_2vs3 = compare(snap2, snap3, '整年排班 vs 單月連排（方法一致性）');
-  const cmp_3vs4 = compare(snap3, snap4, '單月連排 第1次 vs 第2次（重複性）');
+  const cmp_1vs2 = compare(snap1, snap2, '單月連排 第1次 vs 第2次（重複性）');
 
   // ── 產生文字報告 ──────────────────────────────────────────────────
   const L = [];
@@ -5281,8 +5093,7 @@ function runScheduleConsistencyTest(adminPassword) {
   L.push('  排班一致性 + 自檢完整測試報告');
   L.push('════════════════════════════════════════');
 
-  [[val1,'Phase 1 整年-1次'], [val2,'Phase 2 整年-2次'],
-   [val3,'Phase 3 單月-1次'], [val4,'Phase 4 單月-2次']].forEach(([vals, label]) => {
+  [[val1,'Phase 1 單月-1次'], [val2,'Phase 2 單月-2次']].forEach(([vals, label]) => {
     const pass = vals.filter(v => v.status === 'PASS').length;
     const fail = vals.filter(v => v.status === 'FAIL').length;
     const skip = vals.filter(v => v.status === 'no_sheet' || v.status === 'no_data').length;
@@ -5297,25 +5108,22 @@ function runScheduleConsistencyTest(adminPassword) {
 
   L.push('');
   L.push('────────────────────────────────────────');
-  L.push('  快照比對（排班結果一致性）');
+  L.push('  快照比對（重複排班結果一致性）');
   L.push('────────────────────────────────────────');
-
-  [cmp_1vs2, cmp_2vs3, cmp_3vs4].forEach(cmp => {
-    L.push('');
-    L.push(`${cmp.consistent ? '✅' : '❌'} ${cmp.label}`);
-    if (!cmp.consistent) {
-      Object.entries(cmp.monthDiffs).forEach(([m, diffs]) => {
-        L.push(`  ${m}月（${diffs.length}處差異）：`);
-        diffs.slice(0, 8).forEach(d => L.push(`    ${d}`));
-        if (diffs.length > 8) L.push(`    ...（共 ${diffs.length} 處）`);
-      });
-    }
-  });
+  L.push('');
+  L.push(`${cmp_1vs2.consistent ? '✅' : '❌'} ${cmp_1vs2.label}`);
+  if (!cmp_1vs2.consistent) {
+    Object.entries(cmp_1vs2.monthDiffs).forEach(([m, diffs]) => {
+      L.push(`  ${m}月（${diffs.length}處差異）：`);
+      diffs.slice(0, 8).forEach(d => L.push(`    ${d}`));
+      if (diffs.length > 8) L.push(`    ...（共 ${diffs.length} 處）`);
+    });
+  }
 
   L.push('');
   L.push('════════════════════════════════════════');
-  const allValPass = [...val1,...val2,...val3,...val4].every(v => v.status === 'PASS' || v.status === 'no_sheet' || v.status === 'no_data');
-  const allCmpOk   = cmp_1vs2.consistent && cmp_2vs3.consistent && cmp_3vs4.consistent;
+  const allValPass = [...val1,...val2].every(v => v.status === 'PASS' || v.status === 'no_sheet' || v.status === 'no_data');
+  const allCmpOk   = cmp_1vs2.consistent;
   L.push(`總結：自檢 ${allValPass ? '全部通過 ✅' : '有不合格項目 ❌'}`);
   L.push(`      一致性 ${allCmpOk   ? '完全一致 ✅' : '存在差異 ❌'}`);
   L.push('════════════════════════════════════════');
@@ -5327,7 +5135,7 @@ function runScheduleConsistencyTest(adminPassword) {
     report,
     allValidationPass: allValPass,
     allConsistent:     allCmpOk,
-    details: { val1, val2, val3, val4, cmp_1vs2, cmp_2vs3, cmp_3vs4 }
+    details: { val1, val2, cmp_1vs2 }
   };
 }
 

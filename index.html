@@ -263,7 +263,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div class="lx-feat">
         <div class="lx-feat-icon">📅</div>
         <strong>自動排班</strong>
-        <span>一鍵完成單月或整年排班，系統自動輪替並處理假日與排除規則。</span>
+        <span>一鍵完成單月排班，系統自動輪替並處理假日與排除規則。</span>
       </div>
       <div class="lx-feat">
         <div class="lx-feat-icon">🔍</div>
@@ -646,10 +646,6 @@ input[type=button]:active,button:active{transform:scale(.97)}
         <div style="background:linear-gradient(160deg,#1a237e,#6a1b9a,#e91e63);border-radius:14px;padding:14px 10px;display:flex;flex-direction:column;gap:10px;position:sticky;top:0">
           <div style="color:#fff;font-weight:900;font-size:.88rem;text-align:center;letter-spacing:.5px">⚡ 一鍵排班</div>
           <div style="color:rgba(255,255,255,.7);font-size:.68rem;text-align:center;line-height:1.5">建立工作表＋自動排班<br>一次完成</div>
-          <button id="qkFullYearBtn" style="background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.4);color:#fff;font-size:.82rem;font-weight:700;border-radius:10px;padding:10px 6px;margin:0;width:100%;display:flex;flex-direction:column;align-items:center;gap:3px;backdrop-filter:blur(4px)">
-            <span style="font-size:1.2rem">📅</span>整年排班
-            <span style="font-size:.65rem;opacity:.8">4月～12月</span>
-          </button>
           <button id="qkMonthBtn" style="background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.4);color:#fff;font-size:.82rem;font-weight:700;border-radius:10px;padding:10px 6px;margin:0;width:100%;display:flex;flex-direction:column;align-items:center;gap:3px;backdrop-filter:blur(4px)">
             <span style="font-size:1.2rem">📆</span>單月排班
             <span style="font-size:.65rem;opacity:.8">選擇月份</span>
@@ -833,23 +829,6 @@ input[type=button]:active,button:active{transform:scale(.97)}
 
 
       <div class="as" id="tab-sched">
-        <div style="background:linear-gradient(135deg,#f3e5f5,#e8eaf6);border-radius:14px;padding:16px;margin-bottom:14px;border:2px solid #ce93d8">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span style="font-size:1.2rem">🗓</span>
-            <strong style="font-size:.96rem;color:var(--admin)">整年排班（115年4月～12月）</strong>
-          </div>
-          <p style="font-size:.79rem;color:#666;margin:0 0 10px">先按「預覽」確認內容，預覽完成後「確認寫入」按鈕才會出現。</p>
-          <button id="fyPrevBtn" style="width:100%;background:linear-gradient(90deg,#7b1fa2,#ce93d8);color:#fff;margin:0;font-size:.9rem">👁 預覽整年</button>
-          <button id="fyExecBtn" style="width:100%;background:linear-gradient(90deg,#6a1b9a,#e91e63);margin:8px 0 0;font-size:.9rem;display:none">🚀 確認寫入整年</button>
-          <div id="fyMsg" style="margin-top:8px;font-size:.83rem;font-weight:700;display:none"></div>
-          <div id="fyRes" style="display:none;margin-top:8px;flex-direction:column;gap:8px;max-height:65vh;overflow-y:auto"></div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:8px;margin:6px 0 12px">
-          <div style="flex:1;height:1px;background:#ddd"></div>
-          <span style="font-size:.75rem;color:#aaa">或單月排班</span>
-          <div style="flex:1;height:1px;background:#ddd"></div>
-        </div>
         <select id="msel" class="ss"></select>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button id="mPrevBtn" style="flex:1;background:linear-gradient(90deg,#e8eaf6,#c5cae9);color:#3949ab;margin-top:0;font-size:.86rem">👁 預覽單月</button>
@@ -1295,7 +1274,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
     <div id="qkHeader" style="padding:22px 24px 16px;background:linear-gradient(135deg,#1565c0,#0097a7);position:relative">
       <button class="mx" id="qkCloseBtn" style="color:#fff;opacity:.7">✕</button>
       <div style="font-size:1.8rem;text-align:center;margin-bottom:8px" id="qkIcon">📅</div>
-      <div style="font-weight:900;font-size:1.1rem;color:#fff;text-align:center" id="qkTitle">整年排班確認</div>
+      <div style="font-weight:900;font-size:1.1rem;color:#fff;text-align:center" id="qkTitle">單月排班</div>
       <div style="font-size:.8rem;color:rgba(255,255,255,.8);text-align:center;margin-top:4px" id="qkSubtitle">115年4月～12月</div>
     </div>
     <!-- 內容 -->
@@ -1581,8 +1560,6 @@ function bind(){
   };
 
   el('statsLoadBtn').onclick=loadStats;
-  el('fyPrevBtn').onclick=fyPreview;
-  el('fyExecBtn').onclick=fyExec;
   el('mPrevBtn').onclick=mPreview;
   el('mExecBtn').onclick=mExec;
   el('nsel').onchange        = function(){ loadNotifyDates(); };
@@ -2257,64 +2234,6 @@ function loadStaffList(){
     .getStaffNames();
 }
 
-/* ── 整年排班 ── */
-function fyPreview(){
-  el('fyExecBtn').style.display='none';
-  amsg('fyMsg','預覽中，請稍候…','#3949ab');
-  el('fyRes').style.display='none';
-  google.script.run
-    .withSuccessHandler(function(r){
-      amsg('fyMsg',r.summary,r.success?'#3949ab':'var(--danger)');
-      renderFyResults(r.results,true);
-      el('fyExecBtn').style.display='block'; // 預覽後才顯示寫入按鈕
-    })
-    .withFailureHandler(function(e){amsg('fyMsg','失敗：'+e.message,'var(--danger)');})
-    .previewFullYear(adminPwd);
-}
-
-function fyExec(){
-  if(!confirm('確定要將預覽結果寫入試算表？\n此操作將覆蓋現有排班資料。'))return;
-  el('fyExecBtn').style.display='none';
-  amsg('fyMsg','寫入中（約需30秒）…','#6a1b9a');
-  el('fyRes').style.display='none';
-  google.script.run
-    .withSuccessHandler(function(r){
-      amsg('fyMsg',(r.success?'🎉 ':'⚠️ ')+r.summary,r.success?'var(--success)':'var(--warning)');
-      renderFyResults(r.results,false);
-    })
-    .withFailureHandler(function(e){amsg('fyMsg','失敗：'+e.message,'var(--danger)');})
-    .autoScheduleFullYear(adminPwd,{overwrite:true,sendNotify:false});
-}
-
-function renderFyResults(results,isDry){
-  var wrap=el('fyRes');
-  if(!results||!results.length){wrap.style.display='none';return;}
-  wrap.style.display='flex';
-  var html='';
-  results.forEach(function(r,i){
-    var icon=r.status==='ok'?'✅':r.status==='skip'?'⏭':'❌';
-    var bg=r.status==='ok'?'#e8f5e9':r.status==='skip'?'#fff8e1':'#ffebee';
-    var col=r.status==='ok'?'#2e7d32':r.status==='skip'?'#f57c00':'#c62828';
-    var hasPrev=r.preview&&r.preview.length>0;
-    var tag=isDry?' （預覽）':'';
-    html+='<div style="border-radius:8px;overflow:hidden;border:1px solid '+(r.status==='ok'?'#a5d6a7':r.status==='skip'?'#ffe082':'#ef9a9a')+'">';
-    html+='<div id="fyhd'+i+'" style="padding:7px 10px;background:'+bg+';font-size:.82rem;font-weight:700;color:'+col+';cursor:'+(hasPrev?'pointer':'default')+';display:flex;align-items:center;justify-content:space-between">';
-    html+='<span>'+icon+' '+x(r.message||r.label)+tag+'</span>';
-    if(hasPrev)html+='<span style="font-size:.75rem;opacity:.7">👁 點擊查看</span>';
-    html+='</div>';
-    html+='</div>';
-  });
-  wrap.innerHTML=html;
-  results.forEach(function(r,i){
-    if(!r.preview || !r.preview.length) return;
-    var hd=el('fyhd'+i);
-    if(hd){
-      hd.onclick=function(){
-        showFullPreview(r, r.label||r.message||'排班預覽', '整年排班 — 點擊各月查看', null);
-      };
-    }
-  });
-}
 
 /* ════════════════════════════════════════════════════════
    全頁排班預覽系統
@@ -5208,7 +5127,7 @@ function printModal(contentId, title){
   win.document.close();
   setTimeout(function(){ win.print(); }, 500);
 }
-var qkMode = '';      // 'full' | 'month'
+var qkMode = 'month'; // 單月排班
 var qkPreviewed = false; // 是否已預覽過
 // _fpArrangerEmpId cleared on qkModal close
 var _qkLastPreviewData  = null; // 暫存最後一次單月預覽資料（供再次預覽）
@@ -5216,25 +5135,21 @@ var _qkLastPreviewTitle = '';
 var _qkLastPreviewSub   = '';
 
 function initQkBtns(){
-  el('qkFullYearBtn').onclick = function(){ openQkModal('full'); };
-  el('qkMonthBtn').onclick    = function(){ openQkModal('month'); };
+  el('qkMonthBtn').onclick = function(){ openQkModal('month'); };
 }
 
 function openQkModal(mode){
-  qkMode = mode;
+  qkMode = 'month';
   qkPreviewed = false;
   _qkLastPreviewData = null;
   _qkLastPreviewTitle = '';
   _qkLastPreviewSub   = '';
-  var isMonth = mode === 'month';
-  el('qkMonthRow').style.display   = isMonth ? 'block' : 'none';
-  el('qkIcon').textContent         = isMonth ? '📆' : '📅';
-  el('qkTitle').textContent        = isMonth ? '單月排班' : '整年排班';
+  el('qkMonthRow').style.display   = 'block';
+  el('qkIcon').textContent         = '📆';
+  el('qkTitle').textContent        = '單月排班';
   el('qkConfirmBtn').textContent   = '🚀 開始排班';
   el('qkConfirmBtn').disabled      = false;
-  el('qkConfirmBtn').style.background = isMonth
-    ? 'linear-gradient(135deg,#1565c0,#0097a7)'
-    : 'linear-gradient(135deg,#6a1b9a,#e91e63)';
+  el('qkConfirmBtn').style.background = 'linear-gradient(135deg,#1565c0,#0097a7)';
   el('qkEmpId').value = '';
   el('qkMsg').style.display = 'none';
   el('qkPreviewArea').style.display = 'none';
@@ -5262,20 +5177,14 @@ function openQkModal(mode){
     el('qkPreviewArea').style.display = 'none';
     el('qkOverwriteWarn').style.display = 'none';
     var rocY = Number(el('qkYearSel').value) - 1911;
-    el('qkSubtitle').textContent = isMonth
-      ? '民國 '+rocY+' 年，請選擇月份'
-      : '民國 '+rocY+' 年（整年排班）';
-    if(isMonth) loadQkMonths();
+    el('qkSubtitle').textContent = '民國 '+rocY+' 年，請選擇月份';
+    loadQkMonths();
   };
 
   var rocY0 = curYear - 1911;
-  el('qkSubtitle').textContent = isMonth
-    ? '民國 '+rocY0+' 年，請選擇月份'
-    : '民國 '+rocY0+' 年（整年排班）';
+  el('qkSubtitle').textContent = '民國 '+rocY0+' 年，請選擇月份';
 
-  if(isMonth){
-    loadQkMonths();
-  }
+  loadQkMonths();
   showM('qkModal');
 }
 
@@ -5385,8 +5294,8 @@ function bind_qkModal(){
       if(empFromQk) _fpArrangerEmpId = empFromQk;
       amsg('qkMsg','🔍 預覽中，請稍候…','#3949ab');
       el('qkConfirmBtn').disabled = true;
-      var monthName = qkMode === 'month' ? el('qkMonthSel').value : '';
-      if(qkMode === 'month' && !monthName){
+      var monthName = el('qkMonthSel').value;
+      if(!monthName){
         amsg('qkMsg','⚠️ 請選擇月份','#e65100');
         el('qkConfirmBtn').disabled = false;
         return;
@@ -5394,10 +5303,7 @@ function bind_qkModal(){
       google.script.run
         .withSuccessHandler(function(r){
           el('qkConfirmBtn').disabled = false;
-          if(!r.success && qkMode === 'full'){
-            amsg('qkMsg','⚠️ '+r.summary,'#e65100'); return;
-          }
-          if(!r.success && qkMode === 'month'){
+          if(!r.success){
             amsg('qkMsg','❌ '+r.message,'var(--danger)'); return;
           }
           // ★ 先更新按鈕狀態，再呼叫 showFullPreview（避免內部錯誤導致狀態不一致）
@@ -5406,20 +5312,9 @@ function bind_qkModal(){
           amsg('qkMsg','✅ 預覽完成，確認無誤後按「確認寫入」','#2e7d32');
           qkPreviewed = true;
 
-          // 整年：把結果存起來，列表顯示，點擊每月打開全頁預覽
+          // 單月排班預覽
           try {
-            if(qkMode === 'full' && r.results){
-              var html = buildFyPreviewHtml(r.results);
-              el('qkPreviewWrap').innerHTML = html;
-              el('qkPreviewArea').style.display = 'block';
-              r.results.forEach(function(res, i){
-                if(!res.preview || !res.preview.length) return;
-                var hd = el('qfhd'+i);
-                if(hd) hd.onclick = function(){
-                  showFullPreview(res, res.label||res.message||'排班預覽', '整年排班預覽 — 點擊月份查看', null);
-                };
-              });
-            } else if(qkMode === 'month') {
+            {
               var mName = el('qkMonthSel') ? el('qkMonthSel').options[el('qkMonthSel').selectedIndex].text : '';
               _qkLastPreviewData  = r;
               _qkLastPreviewTitle = mName;
@@ -5440,8 +5335,8 @@ function bind_qkModal(){
           el('qkConfirmBtn').disabled = false;
           amsg('qkMsg','預覽失敗：'+e.message,'var(--danger)');
         })
-        .quickSchedule(adminPwd, 'preview', qkMode,
-                       qkMode==='month' ? el('qkMonthSel').value : '',
+        .quickSchedule(adminPwd, 'preview', 'month',
+                       el('qkMonthSel').value,
                        Number(el('qkYearSel').value));
 
     } else {
@@ -5455,7 +5350,7 @@ function bind_qkModal(){
         .withSuccessHandler(function(r){
           el('qkConfirmBtn').disabled = false;
           var ok = r && r.success !== false;
-          var msg = r ? (qkMode==='full' ? (r.summary||r.message||'') : (r.message||r.summary||'')) : '寫入完成';
+          var msg = r ? (r.message||r.summary||'') : '寫入完成';
           if(!ok && r && r.preview) ok = true;
           amsg('qkMsg', (ok?'🎉 ':'⚠️ ') + msg, ok?'var(--success)':'var(--warning)');
           if(ok){
@@ -5500,7 +5395,7 @@ function bind_qkModal(){
             var rp = el('qkRePrevBtn');
             if(rp) rp.style.display='none';
             // 顯示「核章列印」
-            var sheetWritten = qkMode==='month' ? el('qkMonthSel').value : '';
+            var sheetWritten = el('qkMonthSel').value;
             showQkPrintBtn(sheetWritten);
             // ② 再處理拖曳紀錄（失敗不影響UI）
             try {
@@ -5526,8 +5421,8 @@ function bind_qkModal(){
           _fpPreviewData.preview
         );
       } else {
-        writeCall.quickSchedule(adminPwd, 'execute', qkMode,
-          qkMode==='month' ? el('qkMonthSel').value : '',
+        writeCall.quickSchedule(adminPwd, 'execute', 'month',
+          el('qkMonthSel').value,
           Number(el('qkYearSel').value));
       }
     }
@@ -5871,26 +5766,6 @@ function injectWatermark(){}
 function removeWatermark(){}
 
 
-function buildFyPreviewHtml(results){
-  if(!results||!results.length) return '<div style="color:#aaa;text-align:center;padding:8px">無預覽資料</div>';
-  var html = '';
-  results.forEach(function(r,i){
-    var icon = r.status==='ok'?'✅':r.status==='skip'?'⏭':'❌';
-    var bg   = r.status==='ok'?'#e8f5e9':r.status==='skip'?'#fff8e1':'#ffebee';
-    var col  = r.status==='ok'?'#2e7d32':r.status==='skip'?'#f57c00':'#c62828';
-    var hasPrev = r.preview && r.preview.length;
-    html += '<div style="border-radius:8px;overflow:hidden;border:1px solid #e0e0e0;margin-bottom:4px">'
-      +'<div id="qfhd'+i+'" style="padding:6px 10px;background:'+bg+';font-size:.8rem;font-weight:700;color:'+col+';cursor:'+(hasPrev?'pointer':'default')+';display:flex;align-items:center;justify-content:space-between">'
-      +'<span>'+icon+' '+x(r.message||r.label)+'</span>'
-      +(hasPrev?'<span style="font-size:.72rem;opacity:.6">▼</span>':'')
-      +'</div>';
-    if(hasPrev){
-      html += '<div id="qfbd'+i+'" style="display:none;max-height:60vh;overflow:auto">'+buildMthTbl(r)+'</div>';
-    }
-    html += '</div>';
-  });
-  return html;
-}
 
 function buildMonthPreviewHtml(r){
   if(!r||!r.preview) return '<div style="color:#aaa;text-align:center">無預覽資料</div>';
