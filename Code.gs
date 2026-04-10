@@ -2066,9 +2066,16 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       const allSheets = spreadsheet.getSheets().map(s => s.getName());
       const rocYear   = year - 1911;
       const prefix    = rocNumToStr(rocYear) + '年';
-      const yearSheets = allSheets.filter(n =>
-        n !== EMAIL_SHEET_NAME && n.includes(prefix) && n !== sheetName
-      );
+      // ★ 修正 BUG 7：只累積「本月之前」已排月份的門診次數。
+      //   原本掃「所有其他月份」（含未來月），導致第2次排班時1月能看到2-12月資料，
+      //   打亂優先序 → 整年排班 vs 單月連排結果不一致，且多次重排結果不同。
+      //   修正後：以 year/month 為界，只看已過去的月份，算法穩定可重複。
+      const yearSheets = allSheets.filter(n => {
+        if (n === EMAIL_SHEET_NAME || !n.includes(prefix) || n === sheetName) return false;
+        const pm = parseYearMonthFromSheetName(n);
+        // 只取同年、月份嚴格小於當前排班月的工作表
+        return pm.valid && pm.year === year && pm.month < month;
+      });
       const cliHeaders = [null, null, 'E','F','G','H','I','J','K', null, null]; // colIdx 2-8
 
       // ★ 週二/週四分開計數器初始化（TUE_THU_CIS 宣告於 try 外）
@@ -5132,6 +5139,196 @@ function simulateFullYearValidation(adminPassword) {
 
   Logger.log(lines.join('\n'));
   return { success: true, summary: monthResults, report: lines.join('\n') };
+}
+
+// =============================================
+// 排班一致性 + 自檢完整測試
+// runScheduleConsistencyTest(adminPassword)
+//
+// 測試項目：
+//   Phase 1 — 整年排班（overwrite）→ autoValidateSchedule 每月
+//   Phase 2 — 整年排班再跑一次    → 驗算 → 與 Phase 1 比對（重複性）
+//   Phase 3 — 單月連排至 12 月    → 驗算 → 與 Phase 2 比對（方法一致性）
+//   Phase 4 — 單月連排再跑一次    → 驗算 → 與 Phase 3 比對（重複性）
+//
+// 注意：函式實際寫入試算表，完成後班表為 Phase 4 的結果。
+// =============================================
+function runScheduleConsistencyTest(adminPassword) {
+  if (!verifyAdminPassword(adminPassword))
+    return { success: false, message: '管理員密碼錯誤' };
+
+  const spreadsheet = getSpreadsheet();
+  const year  = 2026;
+  const rocY  = year - 1911;
+  const rocMonths = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
+
+  function sn(m)  { return rocNumToStr(rocY) + '年' + rocMonths[m] + '月班表'; }
+  function ts()   { return new Date().toLocaleTimeString(); }
+
+  // 擷取 C2:M32 排班結果（只比較 C~M 欄，不含日期 A/B）
+  function captureSchedule(m) {
+    const sh = spreadsheet.getSheetByName(sn(m));
+    if (!sh) return null;
+    return sh.getRange('C2:M32').getValues().map(r =>
+      r.map(v => v ? v.toString().trim() : '')
+    );
+  }
+
+  // 比對兩份排班快照，回傳差異清單
+  function diffSnaps(a, b, label) {
+    if (!a || !b) return [`${label}: 缺少快照`];
+    const diffs = [];
+    const colLabels = ['C(值班)','D(協掛)','E(門診)','F(流注1)','G(流注2)',
+                       'H(預登1)','I(預登2)','J(注射1)','K(注射2)','L(卡介)','M(停班2)'];
+    for (let r = 0; r < 31; r++) {
+      for (let c = 0; c < 11; c++) {
+        const va = (a[r]||[])[c] || '', vb = (b[r]||[])[c] || '';
+        if (va !== vb) diffs.push(`R${r+2} ${colLabels[c]}: 「${va}」→「${vb}」`);
+      }
+    }
+    return diffs;
+  }
+
+  // 執行整年排班（autoScheduleFullYear overwrite）
+  function runFullYear() {
+    Logger.log(`[${ts()}] 整年排班 start`);
+    const r = autoScheduleFullYear(adminPassword, { overwrite: true, sendNotify: false, targetYear: year });
+    Logger.log(`[${ts()}] 整年排班 end — success:${r.success}`);
+    return r;
+  }
+
+  // 執行單月連排（month 1→12，overwrite）
+  function runSequential() {
+    Logger.log(`[${ts()}] 單月連排 start`);
+    for (let m = 1; m <= 12; m++) {
+      const name = sn(m);
+      const sh   = spreadsheet.getSheetByName(name);
+      if (!sh) { Logger.log(`  ${m}月 no_sheet skip`); continue; }
+      const res = runAutoSchedule(name, adminPassword, { overwrite: true, sendNotify: false, dryRun: false });
+      Logger.log(`  ${m}月 ${res.success ? 'ok' : 'FAIL: ' + res.message}`);
+    }
+    Logger.log(`[${ts()}] 單月連排 end`);
+  }
+
+  // 對全部月份跑 autoValidateSchedule，回傳摘要
+  function validateAll(tag) {
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      const name = sn(m);
+      const sh   = spreadsheet.getSheetByName(name);
+      if (!sh) { rows.push({ m, tag, status: 'no_sheet', errors: [] }); continue; }
+      const hasData = sh.getRange('C2:C5').getValues().flat().some(v => v && v.toString().trim());
+      if (!hasData) { rows.push({ m, tag, status: 'no_data', errors: [] }); continue; }
+      const v = autoValidateSchedule(name);
+      const errs = v.checks ? v.checks.filter(c => !c.pass).flatMap(c => c.errors) : [v.error || ''];
+      rows.push({ m, tag, status: v.allPass ? 'PASS' : 'FAIL', checks: v.checks, errors: errs });
+    }
+    return rows;
+  }
+
+  // 擷取全部月份快照
+  function captureAll() {
+    const s = {};
+    for (let m = 1; m <= 12; m++) s[m] = captureSchedule(m);
+    return s;
+  }
+
+  // ═══════════════════════════════════════
+  // Phase 1：整年排班第 1 次
+  // ═══════════════════════════════════════
+  runFullYear();
+  const snap1 = captureAll();
+  const val1  = validateAll('整年-1次');
+
+  // ═══════════════════════════════════════
+  // Phase 2：整年排班第 2 次（重複性驗證）
+  // ═══════════════════════════════════════
+  runFullYear();
+  const snap2 = captureAll();
+  const val2  = validateAll('整年-2次');
+
+  // ═══════════════════════════════════════
+  // Phase 3：單月連排第 1 次
+  // ═══════════════════════════════════════
+  runSequential();
+  const snap3 = captureAll();
+  const val3  = validateAll('單月-1次');
+
+  // ═══════════════════════════════════════
+  // Phase 4：單月連排第 2 次（重複性驗證）
+  // ═══════════════════════════════════════
+  runSequential();
+  const snap4 = captureAll();
+  const val4  = validateAll('單月-2次');
+
+  // ── 比對快照 ──────────────────────────────────────────────────────
+  const compare = (snapA, snapB, label) => {
+    const result = { label, consistent: true, monthDiffs: {} };
+    for (let m = 1; m <= 12; m++) {
+      const d = diffSnaps(snapA[m], snapB[m], `${m}月`);
+      if (d.length > 0) { result.consistent = false; result.monthDiffs[m] = d; }
+    }
+    return result;
+  };
+
+  const cmp_1vs2 = compare(snap1, snap2, '整年排班 第1次 vs 第2次（重複性）');
+  const cmp_2vs3 = compare(snap2, snap3, '整年排班 vs 單月連排（方法一致性）');
+  const cmp_3vs4 = compare(snap3, snap4, '單月連排 第1次 vs 第2次（重複性）');
+
+  // ── 產生文字報告 ──────────────────────────────────────────────────
+  const L = [];
+  L.push('════════════════════════════════════════');
+  L.push('  排班一致性 + 自檢完整測試報告');
+  L.push('════════════════════════════════════════');
+
+  [[val1,'Phase 1 整年-1次'], [val2,'Phase 2 整年-2次'],
+   [val3,'Phase 3 單月-1次'], [val4,'Phase 4 單月-2次']].forEach(([vals, label]) => {
+    const pass = vals.filter(v => v.status === 'PASS').length;
+    const fail = vals.filter(v => v.status === 'FAIL').length;
+    const skip = vals.filter(v => v.status === 'no_sheet' || v.status === 'no_data').length;
+    L.push('');
+    L.push(`【${label}】自檢結果：✅${pass} / ❌${fail} / ⚠️${skip}`);
+    vals.forEach(v => {
+      const icon = v.status === 'PASS' ? '✅' : v.status === 'FAIL' ? '❌' : '⚠️';
+      L.push(`  ${icon} ${v.m}月（${v.status}）`);
+      (v.errors || []).forEach(e => L.push(`       └ ${e}`));
+    });
+  });
+
+  L.push('');
+  L.push('────────────────────────────────────────');
+  L.push('  快照比對（排班結果一致性）');
+  L.push('────────────────────────────────────────');
+
+  [cmp_1vs2, cmp_2vs3, cmp_3vs4].forEach(cmp => {
+    L.push('');
+    L.push(`${cmp.consistent ? '✅' : '❌'} ${cmp.label}`);
+    if (!cmp.consistent) {
+      Object.entries(cmp.monthDiffs).forEach(([m, diffs]) => {
+        L.push(`  ${m}月（${diffs.length}處差異）：`);
+        diffs.slice(0, 8).forEach(d => L.push(`    ${d}`));
+        if (diffs.length > 8) L.push(`    ...（共 ${diffs.length} 處）`);
+      });
+    }
+  });
+
+  L.push('');
+  L.push('════════════════════════════════════════');
+  const allValPass = [...val1,...val2,...val3,...val4].every(v => v.status === 'PASS' || v.status === 'no_sheet' || v.status === 'no_data');
+  const allCmpOk   = cmp_1vs2.consistent && cmp_2vs3.consistent && cmp_3vs4.consistent;
+  L.push(`總結：自檢 ${allValPass ? '全部通過 ✅' : '有不合格項目 ❌'}`);
+  L.push(`      一致性 ${allCmpOk   ? '完全一致 ✅' : '存在差異 ❌'}`);
+  L.push('════════════════════════════════════════');
+
+  const report = L.join('\n');
+  Logger.log(report);
+  return {
+    success: true,
+    report,
+    allValidationPass: allValPass,
+    allConsistent:     allCmpOk,
+    details: { val1, val2, val3, val4, cmp_1vs2, cmp_2vs3, cmp_3vs4 }
+  };
 }
 
 // ── 排班星期規則設定 ────────────────────────────────────────────────────
