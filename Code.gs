@@ -2570,9 +2570,9 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           swappedSlots.add(i); swappedSlots.add(bestJ);
           swapInfo[i]    = { originalSlot: bestJ };
           swapInfo[bestJ] = { originalSlot: i };
-        } else {
-          assign[i] = '';
         }
+        // ★ 修正 BUG 2：同組內找不到可換對象時，保留原始分配（衝突由 Check 3 偵測），
+        //   不再靜默清空（清空會造成排班空白且 4 項自檢均無法偵測）。
       }
       return { assign, swappedSlots, swapInfo, finalPtr: ptr };
     }
@@ -4597,6 +4597,35 @@ function getAuditHints(sheetName) {
   } catch(e) { return { success: false, message: e.message }; }
 }
 
+// ── 從換班日誌重建「原始排班人」map（供 autoValidateSchedule Check 1 使用）──
+// 與 runAutoSchedule 內部的 buildOriginalMap 邏輯完全一致，
+// 差別在此為頂層函式，使用 getSpreadsheet()。
+function buildOriginalScheduleMap(prevSheetName) {
+  const origMap = {};
+  try {
+    const spreadsheet = getSpreadsheet();
+    const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
+    const logs = settingSheet.getRange('A40:A460').getValues()
+      .flat().filter(r => r && r.toString().trim() !== '');
+    const sh = spreadsheet.getSheetByName(prevSheetName);
+    if (!sh) return origMap;
+    const hdrs = sh.getRange('C1:M1').getValues()[0].map(h => h.toString().trim());
+
+    logs.forEach(log => {
+      const s = log.toString();
+      const m = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
+      if (!m) return;
+      const [, date, shiftType, oldVal] = m;
+      const ci = hdrs.indexOf(shiftType);
+      if (ci === -1) return;
+      const key = date + '|' + ci;
+      // 最早一筆的 oldVal 才是原始排班人（若多次換班取第一次）
+      if (!origMap[key]) origMap[key] = oldVal;
+    });
+  } catch(e) {}
+  return origMap;
+}
+
 // ── 系統自動驗算（背景執行，三項檢查）────────────────────────────────
 function autoValidateSchedule(sheetName) {
   try {
@@ -4668,6 +4697,9 @@ function autoValidateSchedule(sheetName) {
 
     if (prevSheet) {
       const prevData = prevSheet.getRange('A2:M32').getValues();
+      // ★ 修正 BUG 1：使用換班日誌還原「原始排班人」，與排班引擎的指針邏輯一致。
+      //   若只讀儲存格現值（含換班後的人），會與排班引擎的起始指針不一致，導致誤報。
+      const prevOrigMap = buildOriginalScheduleMap(prevSN);
       let prevLastWdDuty='', prevLastHolDuty='';
       let prevLastWdDeng='', prevLastHolDeng='';
       let prevLastWdKk='',   prevLastHolKk='';
@@ -4676,9 +4708,11 @@ function autoValidateSchedule(sheetName) {
         const d = parseDate(r[0]);
         if (!d) return;
         const isHol = isHoliday(d);
-        const duty = (r[2]||'').toString().trim();
-        const kk   = (r[3]||'').toString().trim();
-        const deng = (r[12]||'').toString().trim();
+        const ds = Utilities.formatDate(d, tz, 'M/d');
+        // 優先取原始排班人（換班前），無記錄則用儲存格現值
+        const duty = prevOrigMap[ds + '|0']  || (r[2]||'').toString().trim();
+        const kk   = prevOrigMap[ds + '|1']  || (r[3]||'').toString().trim();
+        const deng = prevOrigMap[ds + '|10'] || (r[12]||'').toString().trim();
         if (isHol) {
           if (duty) prevLastHolDuty = duty;
           if (deng) prevLastHolDeng = deng;
@@ -4716,7 +4750,8 @@ function autoValidateSchedule(sheetName) {
         if (val && val === prev) {
           errors.push({ check: 2, msg: `【${label}連續】${r.ds} 與前一日（${rows[i-1].ds}）均為「${val}」` });
         }
-        if (val) prev = val;
+        // ★ 修正 BUG 3：空白（全員排除日）時重置 prev，避免跨空格誤判連排
+        prev = val || '';
       });
     }
     const wdRows  = curRows.filter(r => !r.isHol);
@@ -4760,50 +4795,29 @@ function autoValidateSchedule(sheetName) {
     dutyNames.forEach(n  => { dutyWd[n]=0;  dutyHol[n]=0; });
     dengNames.forEach(n  => { dengWd[n]=0;  dengHol[n]=0; });
 
-    curRows.forEach(r => {
-      // 門診合計：E-K欄（curData row, indices 2-8）
-      for (let ci=2; ci<=8; ci++) {
-        const name = (curData[curRows.indexOf(r)] ? curData[curRows.indexOf(r)][ci] : '') || '';
-        const nm = name.toString().trim();
+    // ★ 修正 BUG 6：curData = A2:M32，index 0=A,1=B,2=C(值班)...4=E(門診)...10=K(注射2)
+    //   門診系列 E~K = array indices 4~10（原錯誤用 2~8 包含值班/協助掛號並漏掉注射1/2）
+    curData.forEach(row => {
+      for (let idx = 4; idx <= 10; idx++) {
+        const nm = (row[idx]||'').toString().trim();
         if (nm && clinicTotal[nm] !== undefined) clinicTotal[nm]++;
       }
-      // 值班（C欄 = idx 0）
+    });
+
+    // 值班 / 停班2線 計數（從 curRows 直接取，來源已正確）
+    curRows.forEach(r => {
       if (r.duty && dutyWd[r.duty] !== undefined) {
         if (r.isHol) dutyHol[r.duty]++; else dutyWd[r.duty]++;
       }
-      // 停班2線（M欄 = idx 12）
       if (r.deng && dengWd[r.deng] !== undefined) {
         if (r.isHol) dengHol[r.deng]++; else dengWd[r.deng]++;
       }
     });
 
-    // 重算門診合計（用 curData 直接掃，確保與 curRows.indexOf 對齊）
-    Object.keys(clinicTotal).forEach(k=>clinicTotal[k]=0);
-    curData.forEach(row => {
-      for (let ci=2; ci<=8; ci++) {
-        const nm = (row[ci]||'').toString().trim();
-        if (nm && clinicTotal[nm]!==undefined) clinicTotal[nm]++;
-      }
-    });
-
-    const fairCheck = function(label, countMap) {
-      const active = Object.entries(countMap).filter(([n,v]) => v > 0 || true);
-      if (active.length < 2) return;
-      const vals = active.map(([,v])=>v);
-      const maxV = Math.max(...vals), minV = Math.min(...vals);
-      if (maxV - minV >= 4) {
-        const maxN = active.find(([,v])=>v===maxV)[0];
-        const minN = active.find(([,v])=>v===minV)[0];
-        errors.push({ check: 4,
-          msg: `【${label}】最多「${maxN}」${maxV}次 vs 最少「${minN}」${minV}次，差距 ${maxV-minV} 次（超過允許的 ±2）`
-        });
-      }
-    }
-
     // 各群組允許差距上限（超過此值即報錯）
-    // 門診合計 ±2 → max-min >= 5
-    // 值班平日/假日 ±1 → max-min >= 3
-    // 停班2線平日/假日 ±2 → max-min >= 5
+    // 門診合計 ±2 → max-min > 4（即 ≥ 5）
+    // 值班平日/假日 ±1 → max-min > 2（即 ≥ 3）
+    // 停班2線平日/假日 ±2 → max-min > 4（即 ≥ 5）
     const fairCheckT = function(label, countMap, maxAllowed) {
       const active = Object.entries(countMap);
       if (active.length < 2) return;
