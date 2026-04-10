@@ -1843,7 +1843,8 @@ function confirmShift(){
           setTimeout(function(){hideM('scheduleModal');showM('sheetSelectModal');},1000);
         })
         .withFailureHandler(function(e){hideLoad();showAlert('更新失敗：'+e.message,true);})
-        .updateShift(selSheet,curDate,curCol,selOpts,se,eid,rmk);
+        // BUG22 修正：傳入 adminPwd（管理員登入後有值），讓管理員可幫他人換班
+        .updateShift(selSheet,curDate,curCol,selOpts,se,eid,rmk,adminPwd||'');
     })
     .withFailureHandler(function(e){hideLoad();showAlert('驗證失敗：'+e.message,true);})
     .verifyEmpId(eid);
@@ -2413,9 +2414,11 @@ function bindFullPreview(){
   // BUG19 修正：關閉預覽 Modal 時必須清理全域變數，防止殘留資料污染下次預覽
   function closeFpModal(){
     el('fullPreviewModal').style.display='none';
+    // BUG19+23 修正：完整清理所有預覽相關全域變數
     _fpDragChanges = []; _fpCellMap = {};
     _fpPreviewData = null; _fpWriteCallback = null;
     _fpAuditMode = false;
+    _fpArrangerEmpId = ''; _fpWriteLetter = '';
   }
   el('fpClose').onclick  = closeFpModal;
   el('fpCancelBtn').onclick = closeFpModal;
