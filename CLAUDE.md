@@ -6,15 +6,61 @@
 - **試算表 ID 結尾**：`OUQ`（完整 ID 見 Code.gs 的 `SHEET_ID` 常數）
 - **設定工作表名稱**：`班表設定`（`EMAIL_SHEET_NAME`）
 - **製表人**：鄭兆鑫（硬編碼於列印頁尾，勿改）
+- **GitHub**：https://github.com/za869765/CLASS
 
 ---
 
 ## 目前版本
 | 檔案 | 版本 |
 |------|------|
-| 前端 | `index_v4_3__30_.html` |
-| 後端 | `Code_v4_3__15_.gs` |
-| 內部版號 | ver3.23+ |
+| 前端 | `index.html` |
+| 後端 | `Code.gs` |
+| 內部版號 | ver4.4+ |
+
+---
+
+## 已修正 BUG 清單（共 25 項，三輪測試）
+
+### 第一輪（BUG1~16）
+| # | 類別 | 摘要 |
+|---|------|------|
+| 1 | UI | `fpActionRow` 雙 display 屬性 → 按鈕永遠可見 |
+| 2 | UI | `auditEmpOverlay` 重複 display:none → flex 置中失效 |
+| 3 | UI | `rocNumCh()` 缺「一百」前綴 → 工作表名稱全錯 |
+| 4 | UI | `pubStatsSel` 死代碼移除 |
+| 6 | 換班 | `logShiftChange` 不補星期 → regex 解析失敗 |
+| 8 | 換班 | `updateShift` 換班無身份驗證 |
+| 9 | 排班 | `quickSchedule` scope 死參數（整年排班已移除）|
+| 10 | 排班 | `trulyNewStaff` reduce 運算子優先序 `||` 低於 `+` |
+| 11 | 排班 | `isStaffActiveForMonth` 只比月份不含年份 → 跨年誤判 |
+| 14 | 衝突 | `assignSlotsWithPointer` 單輪掃描 → 雙重衝突未解 |
+| 15 | 衝突 | `buildOriginalScheduleMap` + 內部 `buildOriginalMap` 不解析拖曳日誌 |
+| 16 | 衝突 | `simulateFullYearValidation` chkConsec 空值不重置 pv |
+
+### 第二輪（BUG17~21）
+| # | 類別 | 摘要 |
+|---|------|------|
+| 17 | UI 迴歸 | `'一百'+rocNumCh()` 雙重前綴「一百一百…」|
+| 18 | 換班 | 管理員判斷用密碼比 empId → 改用 adminPw 參數 |
+| 19 | UI | 預覽 Modal 關閉未清理全域變數 → 拖曳資料殘留 |
+| 20 | 架構 | `parseYearMonthFromSheetName` 硬編碼 114/115 → 2027 失效 |
+| 21 | 架構 | `parseDateFromSheet` 硬編碼 year=2026 |
+
+### 第三輪（BUG22~25）
+| # | 類別 | 摘要 |
+|---|------|------|
+| 22 | 換班 | 前端 `updateShift` 未傳 adminPwd → 管理員無法幫他人換班 |
+| 23 | UI | `closeFpModal` 未清理 _fpArrangerEmpId/_fpWriteLetter |
+| 24 | 架構 | 3 處殘留硬編碼「一百一十五」|
+| 25 | 架構 | `HOLIDAYS_2026` 改為 `GOV_HOLIDAYS` 多年度 Map |
+
+---
+
+## 架構升級摘要
+- **整年排班功能已移除**（人員變動大，只用單月排班）
+- **年份全面動態化**：`parseYearMonthFromSheetName` 通用解析 + `rocStrToNum` 反向函式
+- **假日多年度支援**：`GOV_HOLIDAYS` Map 結構，每年初需補充放假日資料
+- **換班身份驗證**：`updateShift` 加入 `adminPw` 可選參數，管理員可幫他人換班
 
 ---
 
@@ -81,59 +127,6 @@
 | 9 | L | 卡介苗 | 每月第一個週二工作日 |
 | 10 | M | 停班2線 | 每日（平日/假日分開輪序）|
 
-**混合日欄（TUE_THU_CIS）**：ci = 2, 5, 6, 7（週二/週四分開月計）
-
----
-
-## N1 備註格式（班表工作表）
-
-```
-排定時間: yyyy/MM/dd HH:mm
-審核狀態: pending | approved
-writeCount: N
-swapCount: 姓名1=N,姓名2=N,...
-```
-
----
-
-## 日誌格式
-
-### 一般換班（updateShift）
-```
-M/D 週X 班別 原A→新B (員工編號) 更換時間: ... 備註:...
-```
-
-### 排班者拖曳異動
-```
-排班-姓名 M/D 班別 原A→新B 更換時間: yyyy/MM/dd HH:mm 備註:...
-```
-
-### 審核者拖曳異動
-```
-審核-姓名 M/D 班別 原A→新B 更換時間: yyyy/MM/dd HH:mm 備註:...
-```
-
-### 去重 key（忽略時間和備註）
-```
-排班-姓名 M/D 班別 原A→新B
-審核-姓名 M/D 班別 原A→新B
-```
-
----
-
-## 前端全域變數
-
-```javascript
-var _fpArrangerEmpId = '';    // 排班者/審核者員編（全程沿用）
-var _fpAuditMode = false;     // 審核者模式（允許拖曳全部欄位）
-var _fpDragChanges = [];      // 拖曳異動紀錄
-var _fpPreviewData = null;    // 當前預覽資料
-var _fpWriteCallback = null;  // 確認寫入回呼
-var _fpCellMap = {};          // 每格獨立追蹤 key='rowIdx:ci'
-var adminPwd = '';            // 管理員密碼（登入後儲存）
-var selSheet = '';            // 目前選擇的班表
-```
-
 ---
 
 ## 關鍵函式對照
@@ -142,84 +135,24 @@ var selSheet = '';            // 目前選擇的班表
 | 函式 | 用途 |
 |------|------|
 | `getScheduleData(sheetName)` | 取得班表資料（含 changes/holidayRows/writeCount）|
-| `quickSchedule(pw,mode,scope,month,year)` | 一鍵排班（preview/execute）|
+| `quickSchedule(pw,mode,scope,month,year)` | 一鍵排班（僅 scope='month'）|
 | `runAutoSchedule(sheet,pw,opts)` | 核心排班演算法 |
-| `writeDraggedPreview(sheet,pw,rows)` | 寫入拖曳後的預覽資料 |
-| `writeDragShiftLog(sheet,empId,logs)` | 寫入排班/審核異動日誌（含去重）|
-| `auditSchedule(empId,sheet,action,note,items)` | 核准或退回班表 |
 | `autoValidateSchedule(sheetName)` | 系統自動驗算（4項檢查）|
-| `getAuditHints(sheetName)` | 取得上月末位/本月首位值班資訊 |
-| `getPendingSheets()` | 取得所有審核中班表（含版次/時間）|
-| `getScheduleChanges(sheet,headers)` | 解析日誌回傳 changes 物件 |
-| `wcToLetter(wc)` | 版次字母（A~Z→AA~AZ→...）|
+| `buildOriginalScheduleMap(prevSheetName)` | 從日誌重建原始排班人 map |
+| `parseYearMonthFromSheetName(name)` | 通用民國漢字年月解析 |
+| `rocStrToNum(str)` | 民國漢字→數字（一百一十五→115）|
+| `rocNumToStr(n)` | 數字→民國漢字（115→一百一十五）|
+| `isStaffActiveForMonth(obj,year,month)` | 判斷人員是否在職（完整年月日比較）|
+| `GOV_HOLIDAYS` | 多年度政府假日 Map（每年初需更新）|
 
 ### 前端
 | 函式 | 用途 |
 |------|------|
 | `showFullPreview(r,title,sub,cb,letter)` | 開啟全頁預覽 Modal |
-| `previewPendingSheet(sheetName)` | 審核者預覽（先輸入員編）|
-| `openAuditModal(sheetName)` | 開啟驗算審核視窗 |
-| `saveFpDragLog(sheet,eid,changes,isAudit)` | 前端呼叫 writeDragShiftLog |
-| `wcToLetter(wc)` | 版次字母（與 GAS 同邏輯）|
-| `renderFpCell(td,name,isDragged,isAuditCell)` | 更新格子顯示（含顏色）|
-| `updateFpDragPanel()` | 更新「排班已異動」面板 |
-| `buildFpStats()` | 建立排班統計面板 |
-| `_renderPendingList(r,list)` | 渲染待審核班表清單 |
-| `refreshPendingReview(btn)` | 即時刷新待審核清單 |
-
----
-
-## 排班/審核流程
-
-### 排班者流程
-```
-管理員後台 → 一鍵排班（單月/整年）
-  → 輸入員編
-  → 預覽班表（全頁 Modal，可拖曳 ci=2~9）
-  → 確認寫入 → 儲存至試算表
-  → 驗算審核視窗自動開啟
-  → ✅ 檢視無誤 / ❌ 排班錯誤
-```
-
-### 審核者流程
-```
-管理員後台 → 建立班表 → 待審核班表區
-  → 👁 預覽班表 →
-  → 🔐 CSS Overlay 輸入員編
-  → 全頁預覽（可拖曳全部欄位，_fpAuditMode=true）
-  → 確認寫入 → 自動關閉預覽
-  → 200ms 後自動開啟驗算審核視窗
-  → ✅ 核准 → approved / ❌ 退回刪除 → 發送 email
-```
-
----
-
-## 異動顏色規則
-
-| 角色 | 底色 | 說明 |
-|------|------|------|
-| 排班者異動 | `#fef9c3`（黃） | inline style |
-| 審核者異動 | `#dbeafe`（藍） | inline style |
-| Preloaded（唯讀展示）| 黃底虛線框 | isPreloaded: true |
-
----
-
-## 版次字母規則
-
-```javascript
-// A=1, B=2...Z=26, AA=27, AB=28...AZ=52, BA=53...ZZ=702, AAA=703
-function wcToLetter(wc) {
-  if (!wc || wc <= 0) return '';
-  let n = wc, result = '';
-  while (n > 0) {
-    n--;
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26);
-  }
-  return result;
-}
-```
-**注意**：GAS 和 HTML 各有一份，邏輯完全相同。
+| `closeFpModal()` | 關閉預覽並清理全部全域變數 |
+| `rocNumCh(n)` | 民國漢字（含一百前綴，與 GAS rocNumToStr 同邏輯）|
+| `openQkModal(mode)` | 開啟單月排班 Modal（已移除整年模式）|
+| `confirmShift()` | 換班確認（傳入 adminPwd 支援管理員代換）|
 
 ---
 
@@ -227,16 +160,15 @@ function wcToLetter(wc) {
 
 1. **彈窗一律用 CSS Overlay**，禁止使用 `window.prompt` / `window.alert` / `window.confirm`
 2. **每次修正給完整前後端代碼**（不給 diff）
-3. 日誌去重在 GAS `writeDragShiftLog` 執行，前端 `_fpDragChanges` 過濾 `isPreloaded`
+3. 日誌去重在 GAS `writeDragShiftLog` 執行
 4. 排班者異動：`isAudit: false`；審核者異動：`isAudit: true`
-5. `hasDrag` 判斷只計 non-preloaded 的新異動
-6. 試算表 `A2:A32` 強制設為純文字格式（`@`），避免日期被轉型
-7. 班表工作表名稱格式：`一百一十五年四月班表`（民國漢字年月）
+5. 試算表 `A2:A32` 強制設為純文字格式（`@`）
+6. 班表工作表名稱格式：`一百一十五年四月班表`（民國漢字年月）
+7. **年份不可硬編碼**：一律用 `new Date().getFullYear()` 或 `parseYearMonthFromSheetName` 動態取得
+8. **GOV_HOLIDAYS 每年初需更新**：新增下一年度放假日 Set
 
 ---
 
-## 待辦 / 已知問題
-
-- [ ] 確認審核者異動底色（藍色）在各瀏覽器正確顯示
-- [ ] `isAuditLog` 旗標從 GAS `getScheduleChanges` 正確傳遞到前端 badge
-- [ ] 2027 年（116年）班表年份支援（`parseYearMonthFromSheetName` 已支援 roc114/115）
+## 待辦 / 年度維護
+- [ ] 每年 12 月前：補充下一年度 `GOV_HOLIDAYS[20XX]` 放假日資料
+- [ ] 確認 `rocNumCh`（前端）與 `rocNumToStr`（後端）邏輯一致
