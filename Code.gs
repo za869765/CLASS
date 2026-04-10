@@ -129,12 +129,14 @@ function getFirstTuesdayWorkday(year, month) {
 }
 
 function parseDateFromSheet(dateStr, sheetName) {
+  // BUG21 修正：從 sheetName 解析年份，不再硬編碼 2026
   if (!dateStr) return null;
   const match = dateStr.match(/(\d+)\/(\d+)/);
   if (!match) return null;
   const month = parseInt(match[1]);
   const day = parseInt(match[2]);
-  const year = 2026;
+  const parsed = sheetName ? parseYearMonthFromSheetName(sheetName) : null;
+  const year = (parsed && parsed.valid) ? parsed.year : new Date().getFullYear();
   return new Date(year, month - 1, day);
 }
 
@@ -262,22 +264,24 @@ function listAllSheets() {
 
 
 // =============================================
-// 取得115年全部班表（含1-2月，不限制過去/未來）
+// 取得當年度全部班表（含1-12月，不限制過去/未來）
+// BUG20 連帶修正：不再硬編碼 115/2026，動態取當年度
 // =============================================
 function getAllYear115Sheets() {
   const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
   const allNames = spreadsheet.getSheets().map(s => s.getName());
-  const sheets115 = allNames.filter(n => {
+  const currentYear = new Date().getFullYear();
+  const sheetsThisYear = allNames.filter(n => {
     if (n === EMAIL_SHEET_NAME) return false;
     const ym = parseYearMonthFromSheetName(n);
-    return ym.year === 2026 && ym.valid;
+    return ym.valid && ym.year === currentYear;
   });
-  sheets115.sort((a, b) => {
+  sheetsThisYear.sort((a, b) => {
     const pa = parseYearMonthFromSheetName(a);
     const pb = parseYearMonthFromSheetName(b);
     return (pa.year * 100 + pa.month) - (pb.year * 100 + pb.month);
   });
-  return sheets115;
+  return sheetsThisYear;
 }
 
 // =============================================
@@ -730,7 +734,7 @@ function getShiftOptions(column) {
   return { options, selectType: GLOBAL_CONFIG.SELECT_TYPE[columnLetter] || 'SC' };
 }
 
-function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, remark) {
+function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, remark, adminPw) {
   if (!sheetName || typeof sheetName !== 'string' || !date || !shiftColumn || !Array.isArray(newShifts))
     return '參數錯誤，請聯絡管理員。';
   // ── 過去月份鎖定，拒絕寫入 ──────────────────────────────────
@@ -744,15 +748,14 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
     const newShift = newShifts.join(', ');
     if (oldShift === newShift) return '班別未改變，無需更新。';
 
-    // BUG 8 修正：驗證換班者身份 — empId 必須對應到「原班別人員」或有效員工
-    // 非管理員操作時，只允許換自己的班（empId 對應的姓名必須是 oldShift）
+    // BUG 8+18 修正：驗證換班者身份
+    // 管理員（傳入正確 adminPw）可幫任何人換班；一般員工只能換自己的班
     if (empId) {
-      const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
-      const names  = settingSheet.getRange('I1:I11').getValues().flat().map(n => n ? n.toString().trim() : '');
-      const empIds = settingSheet.getRange('M1:M11').getValues().flat().map(n => n ? n.toString().trim() : '');
-      const pwCell = settingSheet.getRange('N2').getValue();
-      const isAdmin = (empId === (pwCell ? pwCell.toString().trim() : ''));
+      const isAdmin = adminPw ? verifyAdminPassword(adminPw) : false;
       if (!isAdmin) {
+        const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
+        const names  = settingSheet.getRange('I1:I11').getValues().flat().map(n => n ? n.toString().trim() : '');
+        const empIds = settingSheet.getRange('M1:M11').getValues().flat().map(n => n ? n.toString().trim() : '');
         const empIdx = empIds.indexOf(empId.toString().trim());
         const staffName = empIdx !== -1 ? names[empIdx] : '';
         const oldShiftStr = oldShift ? oldShift.toString().trim() : '';
@@ -1727,25 +1730,55 @@ function shouldAssignShift(date, colIdx, year, month) {
 }
 
 function parseYearMonthFromSheetName(sheetName) {
+  // BUG20 修正：改為通用解析，不再硬編碼 114/115 年
+  // 支援所有民國 100~199 年（西元 2011~2110）
   const rocMonthMap = {
     '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,
     '七':7,'八':8,'九':9,'十':10,'十一':11,'十二':12
   };
-  const rocMatch = sheetName.match(/一百一十五年([一二三四五六七八九十]+月)/);
+
+  // 動態匹配所有民國百位年份：「一百X十Y年」
+  // 例如「一百一十五年四月班表」→ 民國 115 → 西元 2026
+  const rocMatch = sheetName.match(/(一百[一二三四五六七八九]?十?[一二三四五六七八九]?)年([一二三四五六七八九十]+)月/);
   if (rocMatch) {
-    const mStr = rocMatch[1].replace('月','');
+    const rocYearStr = rocMatch[1];
+    const mStr = rocMatch[2];
     const month = rocMonthMap[mStr];
-    if (month) return { year: 2026, month, valid: true };
+    if (month) {
+      // 反向解析民國漢字年份為數字
+      const rocYear = rocStrToNum(rocYearStr);
+      if (rocYear > 0) {
+        return { year: rocYear + 1911, month, valid: true };
+      }
+    }
   }
-  const roc114 = sheetName.match(/一百一十四年([一二三四五六七八九十]+月)/);
-  if (roc114) {
-    const mStr = roc114[1].replace('月','');
-    const month = rocMonthMap[mStr];
-    if (month) return { year: 2025, month, valid: true };
-  }
+
+  // Fallback：數字格式（2026年4月）
   const numMatch = sheetName.match(/(\d{4})年(\d{1,2})月/);
   if (numMatch) return { year: parseInt(numMatch[1]), month: parseInt(numMatch[2]), valid: true };
-  return { year: 2026, month: 1, valid: false };  // 無法解析，標記為無效
+  return { year: new Date().getFullYear(), month: 1, valid: false };
+}
+
+// 民國漢字 → 數字（一百一十五 → 115）
+function rocStrToNum(str) {
+  if (!str) return 0;
+  const unitMap = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+  // 格式：一百 + [X十] + [Y]
+  if (!str.startsWith('一百')) return 0;
+  const rem = str.substring(2); // 去掉「一百」
+  if (!rem) return 100;
+  let tens = 0, units = 0;
+  const tenMatch = rem.match(/([一二三四五六七八九])十/);
+  if (tenMatch) {
+    tens = unitMap[tenMatch[1]] || 0;
+  } else if (rem.includes('十')) {
+    tens = 1; // 「十」=10（不帶前綴）
+  }
+  // 個位：十後面的字，或沒有十時直接的字
+  const afterTen = rem.split('十');
+  const lastPart = afterTen.length > 1 ? afterTen[afterTen.length - 1] : (tens === 0 ? rem : '');
+  if (lastPart && unitMap[lastPart]) units = unitMap[lastPart];
+  return 100 + tens * 10 + units;
 }
 
 function getShiftStaffMap() {
@@ -2828,7 +2861,7 @@ function getScheduleStats(sheetName) {
         if (n === EMAIL_SHEET_NAME) return false;
         if (!n.includes('班表')) return false;
         const ym = parseYearMonthFromSheetName(n);
-        return ym.year === 2026 && ym.valid;
+        return ym.valid && ym.year === new Date().getFullYear();
       });
     } else {
       sheets = [sheetName];
@@ -3065,7 +3098,7 @@ function getPersonalStats(personName, sheetName) {
 
       monthlyDetail.push({
         sheetName: sName,
-        label: sName.replace('班表','').replace('一百一十五年','115年'),
+        label: sName.replace('班表','').replace(/一百[一二三四五六七八九十]+年/, (m) => { const r = rocStrToNum(m.replace('年','')); return r > 0 ? r + '年' : m; }),
         counts: [...monthCounts],
         total: monthCounts.reduce((a,b) => a+b, 0)
       });
@@ -3112,7 +3145,7 @@ function getOvertimeStats(sheetName) {
           if (n === EMAIL_SHEET_NAME) return false;
           if (!n.includes('班表')) return false;
           const ym = parseYearMonthFromSheetName(n);
-          return ym.year === 2026 && ym.valid;
+          return ym.valid && ym.year === new Date().getFullYear();
         })
         .map(n => ({ name: n, ...parseYearMonthFromSheetName(n) }))
         .sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
@@ -3218,7 +3251,7 @@ function getHolidayAttendanceStats(sheetName) {
           if (n === EMAIL_SHEET_NAME) return false;
           if (!n.includes('班表')) return false;
           const ym = parseYearMonthFromSheetName(n);
-          return ym.year === 2026 && ym.valid;
+          return ym.valid && ym.year === new Date().getFullYear();
         })
         .map(n => ({ name: n, ...parseYearMonthFromSheetName(n) }))
         .sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
@@ -3922,7 +3955,7 @@ function makeHelpMessage(prefix) {
           lineCard([
             lineCardTitle('📂', '搜尋範圍', '#9B59B6'),
             lineSep('md'),
-            { type: 'text', text: '115年全年班表（1月～12月）', size: 'sm', color: '#7F8C8D', margin: 'sm' }
+            { type: 'text', text: (new Date().getFullYear()-1911)+'年全年班表（1月～12月）', size: 'sm', color: '#7F8C8D', margin: 'sm' }
           ])
         ]
       }
@@ -4805,7 +4838,7 @@ function simulateFullYearValidation(adminPassword) {
   const spreadsheet = getSpreadsheet();
   const tz = spreadsheet.getSpreadsheetTimeZone();
   const rocMonths = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
-  const year = 2026;
+  const year = new Date().getFullYear();
 
   // 讀設定表名單
   const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
@@ -5056,7 +5089,8 @@ function simulateFullYearValidation(adminPassword) {
   const passCount = monthResults.filter(r=>r.pass===true).length;
   const failCount = monthResults.filter(r=>r.pass===false && r.source !== 'no_sheet' && r.source !== 'no_data').length;
   const lines = [];
-  lines.push(`=== 115年全年排班自檢模擬結果 ===`);
+  const rocYearDisp = new Date().getFullYear() - 1911;
+  lines.push(`=== ${rocYearDisp}年全年排班自檢模擬結果 ===`);
   lines.push(`通過: ${passCount} 月 | 不通過: ${failCount} 月`);
   lines.push('');
   monthResults.forEach(r => {

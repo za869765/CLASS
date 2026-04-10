@@ -787,7 +787,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
         <div id="advToolsPanel" style="display:none;animation:advIn .22s ease">
 
         <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:12px;padding:14px;margin-bottom:14px;border:2px solid #a5d6a7">
-          <strong style="color:#2e7d32;font-size:.94rem">📋 批次建立下個月到115年12月</strong>
+          <strong style="color:#2e7d32;font-size:.94rem">📋 批次建立下個月到當年12月</strong>
           <p style="font-size:.79rem;color:#555;margin:6px 0 10px">工作表名稱格式：<code style="background:#f0f0f0;padding:1px 6px;border-radius:4px">{rm}</code>=中文月份 <code style="background:#f0f0f0;padding:1px 6px;border-radius:4px">{ry}</code>=民國年</p>
           <input type="text" id="namePattern" placeholder="一百一十五年{rm}月班表" style="width:100%;padding:8px 12px;border:1.5px solid #a5d6a7;border-radius:8px;font-size:.9rem;background:#fafafa;outline:none;margin-bottom:10px;font-family:var(--f)">
           <button id="createAllBtn" style="background:linear-gradient(90deg,#2e7d32,#43a047);margin:0">📋 批次建立所有月份工作表</button>
@@ -1231,7 +1231,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
         <!-- 進階設定說明 -->
         <div class="lb-info">
           <strong>📋 進階設定（直接在試算表填寫）</strong><br>
-          <span style="color:#555">R4:R15</span> — 指定搜尋的工作表名稱，<b>空白 = 自動使用全年115年班表</b><br>
+          <span style="color:#555">R4:R15</span> — 指定搜尋的工作表名稱，<b>空白 = 自動使用當年全年班表</b><br>
           <span style="color:#555">S1:S13</span> — 指定搜尋的欄位代號（A/B/C…M），<b>空白 = 搜尋全部欄位 A~M</b>
           <div style="margin-top:8px;padding:8px 10px;background:#e8f5e9;border-radius:6px;font-size:.75rem;color:#2e7d32">
             目前搜尋範圍：<span id="lbScopeText" style="font-weight:700">（載入中）</span><br>
@@ -1275,7 +1275,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <button class="mx" id="qkCloseBtn" style="color:#fff;opacity:.7">✕</button>
       <div style="font-size:1.8rem;text-align:center;margin-bottom:8px" id="qkIcon">📅</div>
       <div style="font-weight:900;font-size:1.1rem;color:#fff;text-align:center" id="qkTitle">單月排班</div>
-      <div style="font-size:.8rem;color:rgba(255,255,255,.8);text-align:center;margin-top:4px" id="qkSubtitle">115年4月～12月</div>
+      <div style="font-size:.8rem;color:rgba(255,255,255,.8);text-align:center;margin-top:4px" id="qkSubtitle"></div>
     </div>
     <!-- 內容 -->
     <div style="padding:18px 20px">
@@ -1578,7 +1578,8 @@ function bind(){
     var y=el('cYear').value, m=el('cMonth').value;
     var rocY=parseInt(y)-1911;
     var rocM=['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
-    el('cName').value='一百'+rocNumCh(rocY)+'年'+rocM[parseInt(m)]+'月班表';
+    // BUG17 修正：rocNumCh() 已回傳完整「一百一十五」，不再額外加「一百」
+    el('cName').value=rocNumCh(rocY)+'年'+rocM[parseInt(m)]+'月班表';
   }
   function rocNumCh(n){
     // 支援 100~199（民國 100~199 年）
@@ -1900,13 +1901,14 @@ function initAdmin(){
     })
     .withFailureHandler(function(e){showAlert('載入班表清單失敗：'+e.message,true);})
     .getAllScheduleSheets();
-  // 職務統計選單：獨立呼叫，含115年1-2月
+  // 職務統計選單：獨立呼叫，含當年全年
   google.script.run
     .withSuccessHandler(function(allSheets){
       var so=allSheets.length
         ?allSheets.map(function(s){return'<option value="'+x(s)+'">'+x(s)+'</option>';}).join('')
         :'';
-      el('statsSel').innerHTML='<option value="__ALL__">📅 115年整年</option>'+so;
+      var rocYDisp = new Date().getFullYear()-1911;
+      el('statsSel').innerHTML='<option value="__ALL__">📅 '+rocYDisp+'年整年</option>'+so;
       // BUG 4 修正：pubStatsSel 元素不存在，已移除死代碼
     })
     .getAllYear115Sheets();
@@ -2408,8 +2410,15 @@ function applyFpFontSize(){
 }
 
 function bindFullPreview(){
-  el('fpClose').onclick  = function(){ el('fullPreviewModal').style.display='none'; };
-  el('fpCancelBtn').onclick = function(){ el('fullPreviewModal').style.display='none'; };
+  // BUG19 修正：關閉預覽 Modal 時必須清理全域變數，防止殘留資料污染下次預覽
+  function closeFpModal(){
+    el('fullPreviewModal').style.display='none';
+    _fpDragChanges = []; _fpCellMap = {};
+    _fpPreviewData = null; _fpWriteCallback = null;
+    _fpAuditMode = false;
+  }
+  el('fpClose').onclick  = closeFpModal;
+  el('fpCancelBtn').onclick = closeFpModal;
   el('fpZoomIn').onclick  = function(){ _fpFontSize = Math.min(1.6, _fpFontSize + 0.1); applyFpFontSize(); };
   el('fpZoomOut').onclick = function(){ _fpFontSize = Math.max(0.6, _fpFontSize - 0.1); applyFpFontSize(); };
   el('fpPrint').onclick   = function(){
@@ -3422,7 +3431,8 @@ function sendManualNotify(){
 /* ── 建立工作表 ── */
 function createAll(){
   var pattern=el('namePattern').value.trim()||'一百一十五年{rm}月班表';
-  if(!confirm('確定要批次建立「下個月到115年12月」的工作表？\n格式：'+pattern))return;
+  var _rocY3=new Date().getFullYear()-1911;
+  if(!confirm('確定要批次建立「下個月到'+_rocY3+'年12月」的工作表？\n格式：'+pattern))return;
   amsg('createAllMsg','建立中，請稍候...','#2e7d32');
   el('createAllRes').style.display='none';
   google.script.run
@@ -4971,7 +4981,7 @@ function openPubStats(){
   el('pubStatsLoadMsg').style.display='block';
   el('pubStatsLoadMsg').textContent='🔄 載入中…';
   showM('pubStatsModal');
-  // 自動載入115年整年
+  // 自動載入當年整年
   google.script.run
     .withSuccessHandler(function(r){
       el('pubStatsLoadMsg').style.display='none';
