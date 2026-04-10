@@ -459,7 +459,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
     </div>
     <!-- 排班者員工編號由 qkEmpId 自動帶入，不需在此重複輸入 -->
     <!-- 確認寫入按鈕（預覽模式才顯示）-->
-    <div id="fpActionRow" style="display:none;margin-top:14px;display:flex;gap:10px">
+    <div id="fpActionRow" style="display:none;margin-top:14px;gap:10px">
       <button id="fpWriteBtn" style="flex:1;font-size:1rem;font-weight:900;padding:14px;background:linear-gradient(90deg,#2e7d32,#43a047)">✅ 確認寫入</button>
       <button id="fpCancelBtn" style="flex:1;font-size:1rem;padding:14px;background:linear-gradient(90deg,#90a4ae,#607d8b)">取消</button>
     </div>
@@ -702,7 +702,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
         </div>
 
 <!-- ── 審核者員編輸入 Overlay ── -->
-<div id="auditEmpOverlay" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center">
+<div id="auditEmpOverlay" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:24px;padding:36px 32px;width:92%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;animation:up .22s">
     <div style="font-size:2.4rem;margin-bottom:10px">🔐</div>
     <div style="font-weight:900;font-size:1.1rem;color:#0d47a1;margin-bottom:4px">審核者身份確認</div>
@@ -1581,12 +1581,13 @@ function bind(){
     el('cName').value='一百'+rocNumCh(rocY)+'年'+rocM[parseInt(m)]+'月班表';
   }
   function rocNumCh(n){
-    // 支援 100~119（民國 100~119 年）
+    // 支援 100~199（民國 100~199 年）
+    // 修正 BUG 3：補齊「一百」前綴，確保工作表名稱正確（如「一百一十五年」）
     var units=['','一','二','三','四','五','六','七','八','九'];
     var tens =['','一十','二十','三十','四十','五十','六十','七十','八十','九十'];
     if(n<100||n>199) return String(n);
     var rem=n-100, t=Math.floor(rem/10), u=rem%10;
-    return (t>0?tens[t]:'')+(u>0?units[u]:'');
+    return '一百'+(t>0?tens[t]:'')+(u>0?units[u]:'');
   }
   el('cYear').oninput=updateCName;
   el('cMonth').onchange=updateCName;
@@ -1906,7 +1907,7 @@ function initAdmin(){
         ?allSheets.map(function(s){return'<option value="'+x(s)+'">'+x(s)+'</option>';}).join('')
         :'';
       el('statsSel').innerHTML='<option value="__ALL__">📅 115年整年</option>'+so;
-      if(el('pubStatsSel')) el('pubStatsSel').innerHTML=el('statsSel').innerHTML;
+      // BUG 4 修正：pubStatsSel 元素不存在，已移除死代碼
     })
     .getAllYear115Sheets();
   loadStaffList();

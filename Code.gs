@@ -794,6 +794,18 @@ function findRowByDate(sheet, targetDate) {
 }
 
 function logShiftChange(sheetName, date, oldShift, newShift, shiftType, empId, remark) {
+  // BUG 6 修正：自動補齊星期，確保日誌格式一致（getScheduleChanges regex 需要 週X）
+  let dateWithDay = date ? date.toString().trim() : '';
+  if (dateWithDay && !/週./.test(dateWithDay)) {
+    const weekDays = ['日','一','二','三','四','五','六'];
+    const parts = dateWithDay.match(/(\d+)\/(\d+)/);
+    if (parts) {
+      try {
+        const d = new Date(new Date().getFullYear(), parseInt(parts[1])-1, parseInt(parts[2]));
+        dateWithDay = dateWithDay + ' 週' + weekDays[d.getDay()];
+      } catch(e) {}
+    }
+  }
   const logSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
   const logRange = logSheet.getRange('A40:A460').getValues();
   let logRow = 40;
@@ -808,7 +820,7 @@ function logShiftChange(sheetName, date, oldShift, newShift, shiftType, empId, r
   const empIdStr = empId ? `(${empId}) ` : '';
   const remarkStr = remark ? ' 備註:' + remark.toString().trim().split('\n').join(' ') : '';
   logSheet.getRange(logRow, 1).setValue(
-    `${date} ${shiftType} 原${oldShift}→新${newShift} ${empIdStr}更換時間: ${new Date().toLocaleString()}${remarkStr}`
+    `${dateWithDay} ${shiftType} 原${oldShift}→新${newShift} ${empIdStr}更換時間: ${new Date().toLocaleString()}${remarkStr}`
   );
 }
 
@@ -1403,6 +1415,10 @@ function getYearlyClinicStats() {
 // targetYear: 西元年（如 2026），預設用當年
 function quickSchedule(adminPassword, mode, scope, month, targetYear) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
+  // BUG 9 修正：整年排班已移除，scope 僅接受 'month'
+  if (scope && scope !== 'month') {
+    return { success: false, message: '整年排班功能已停用，請逐月排班。' };
+  }
   try {
     const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
     {
@@ -2075,7 +2091,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       {
         const clinicCiList2 = [2,3,4,5,6,7,8];
         Object.keys(assignCount[2] || {}).forEach(n => {
-          const total0 = clinicCiList2.reduce((s,ci2)=>(assignCount[ci2]||{})[n]||0+s,0);
+          // BUG 10 修正：運算子優先序 || 低於 +，必須加括號確保正確累加
+          const total0 = clinicCiList2.reduce((s,ci2)=>((assignCount[ci2]||{})[n]||0)+s, 0);
           if (total0 === 0) trulyNewStaff.add(n);
         });
       }
@@ -2507,32 +2524,43 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         assign.push(chosen);
         ptr = nextPtr;
       }
-      // Step2: 衝突 swap（只在同組內，優先選換過最少次的人互換）
+      // Step2: 衝突 swap（多輪迴圈，直到無衝突為止）
+      // BUG 14 修正：原先只做單輪 j > i 掃描，無法處理：
+      //   (1) i 之前的位置才能提供互換對象；(2) swap 後新衝突未被偵測
+      // 現改為：全範圍掃描 + 多輪迴圈，最多執行 assign.length 輪
       const swappedSlots = new Set();
       const swapInfo = {};
-      for (let i = 0; i < assign.length; i++) {
-        if (!assign[i]) continue;
-        const dutyI = result[slots[i].rowIdx][0] || dutyByDate[slots[i].dk] || '';
-        if (assign[i] !== dutyI) continue;
-        // 找同組內所有可換對象，優先選 swapCount 最少者
-        let bestJ = -1, bestCount = Infinity;
-        for (let j = i + 1; j < assign.length; j++) {
-          if (assign[j] && assign[j] !== dutyI) {
+      let maxPass = assign.length + 1;
+      let hasConflict = true;
+      while (hasConflict && maxPass-- > 0) {
+        hasConflict = false;
+        for (let i = 0; i < assign.length; i++) {
+          if (!assign[i]) continue;
+          const dutyI = result[slots[i].rowIdx][0] || dutyByDate[slots[i].dk] || '';
+          if (assign[i] !== dutyI) continue;
+          // 衝突：assign[i] 與當日值班者相同
+          hasConflict = true;
+          // 找同組內「換後不衝突」的最佳對象（全範圍搜尋，不限 j > i）
+          let bestJ = -1, bestCount = Infinity;
+          for (let j = 0; j < assign.length; j++) {
+            if (j === i || !assign[j]) continue;
+            if (assign[j] === dutyI) continue; // j 本身也衝突，換了沒用
+            // 確認把 assign[j] 放到 slot[i] 後不會再衝突
+            const dutyJ = result[slots[j].rowIdx][0] || dutyByDate[slots[j].dk] || '';
+            if (assign[i] === dutyJ) continue; // assign[i] 換去 j 位置也會衝突
             const cnt = swapCounts[assign[j]] || 0;
             if (cnt < bestCount) { bestCount = cnt; bestJ = j; }
           }
+          if (bestJ !== -1) {
+            swapCounts[assign[i]]     = (swapCounts[assign[i]]     || 0) + 1;
+            swapCounts[assign[bestJ]] = (swapCounts[assign[bestJ]] || 0) + 1;
+            const tmp = assign[i]; assign[i] = assign[bestJ]; assign[bestJ] = tmp;
+            swappedSlots.add(i); swappedSlots.add(bestJ);
+            swapInfo[i]     = { originalSlot: bestJ };
+            swapInfo[bestJ] = { originalSlot: i };
+          }
+          // 找不到可換對象：保留原始分配（衝突由 Check 3 偵測）
         }
-        if (bestJ !== -1) {
-          // 更新 swapCount
-          swapCounts[assign[i]]    = (swapCounts[assign[i]]    || 0) + 1;
-          swapCounts[assign[bestJ]] = (swapCounts[assign[bestJ]] || 0) + 1;
-          const tmp = assign[i]; assign[i] = assign[bestJ]; assign[bestJ] = tmp;
-          swappedSlots.add(i); swappedSlots.add(bestJ);
-          swapInfo[i]    = { originalSlot: bestJ };
-          swapInfo[bestJ] = { originalSlot: i };
-        }
-        // ★ 修正 BUG 2：同組內找不到可換對象時，保留原始分配（衝突由 Check 3 偵測），
-        //   不再靜默清空（清空會造成排班空白且 4 項自檢均無法偵測）。
       }
       return { assign, swappedSlots, swapInfo, finalPtr: ptr };
     }
@@ -2897,24 +2925,33 @@ function isPersonExcluded(name, dateObj, exclusions, year) {
 // 有離職日且 leaveDate < 排班月第一天 → 已離職，不應排入
 // 有到職日且 joinDate > 排班月最後一天 → 尚未到職，不應排入
 function isStaffActiveForMonth(staffObj, schedYear, schedMonth) {
+  // BUG 11 修正：改用完整日期比較（年+月+日），避免跨年誤判
+  // 例如：去年 10 月離職者，排今年 1 月班表，10 > 1 但應視為已離職
   const parseMDLocal = (str) => {
     if (!str) return null;
     const m = str.toString().match(/(\d+)\/(\d+)/);
     return m ? { month: parseInt(m[1]), day: parseInt(m[2]) } : null;
   };
-  // 離職日檢查：離職年月 < 排班年月 → 已離職
+  // 排班月第一天（用於比較「是否已離職」）
+  const schedFirstDay = new Date(schedYear, schedMonth - 1, 1);
+
+  // 離職日檢查：離職日期 < 排班月第一天 → 已離職不排入
   if (staffObj.leaveDate) {
     const ld = parseMDLocal(staffObj.leaveDate);
     if (ld) {
-      // 離職月 < 排班月 → 不排入
-      if (ld.month < schedMonth) return false;
+      // 用 schedYear 建構完整離職日期（M/D 格式無年份，預設同排班年）
+      const leaveFullDate = new Date(schedYear, ld.month - 1, ld.day);
+      if (leaveFullDate < schedFirstDay) return false;
     }
   }
-  // 到職日檢查：到職月 > 排班月 → 尚未到職
+  // 到職日檢查：到職日期 > 排班月最後一天 → 尚未到職
   if (staffObj.joinDate) {
     const jd = parseMDLocal(staffObj.joinDate);
     if (jd) {
-      if (jd.month > schedMonth) return false;
+      // 排班月最後一天
+      const schedLastDay = new Date(schedYear, schedMonth, 0);
+      const joinFullDate = new Date(schedYear, jd.month - 1, jd.day);
+      if (joinFullDate > schedLastDay) return false;
     }
   }
   return true;
@@ -4457,15 +4494,34 @@ function buildOriginalScheduleMap(prevSheetName) {
     const hdrs = sh.getRange('C1:M1').getValues()[0].map(h => h.toString().trim());
 
     logs.forEach(log => {
-      const s = log.toString();
-      const m = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
-      if (!m) return;
-      const [, date, shiftType, oldVal] = m;
-      const ci = hdrs.indexOf(shiftType);
-      if (ci === -1) return;
-      const key = date + '|' + ci;
-      // 最早一筆的 oldVal 才是原始排班人（若多次換班取第一次）
-      if (!origMap[key]) origMap[key] = oldVal;
+      const s = log.toString().trim();
+
+      // ── 格式1：一般換班日誌（含星期）──
+      // 格式：M/D 週X 班別 原A→新B (empId) 更換時間: ...
+      const m1 = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
+      if (m1) {
+        const [, date, shiftType, oldVal] = m1;
+        const ci = hdrs.indexOf(shiftType);
+        if (ci !== -1) {
+          const key = date + '|' + ci;
+          if (!origMap[key]) origMap[key] = oldVal;
+        }
+        return;
+      }
+
+      // ── 格式2：拖曳日誌（排班者 / 審核者）──
+      // BUG 15 修正：補充解析 排班-姓名 / 審核-姓名 格式，避免原始排班還原不完整
+      // 格式：排班-姓名 M/D 班別 原A→新B 更換時間: ...
+      //       審核-姓名 M/D 班別 原A→新B 更換時間: ...
+      const m2 = s.match(/^(?:排班|審核)-.+?\s+(\d+\/\d+)\s+(.+?)\s+原(.+?)→新(.+?)\s+更換時間:/);
+      if (m2) {
+        const [, date, shiftType, oldVal] = m2;
+        const ci = hdrs.indexOf(shiftType);
+        if (ci !== -1) {
+          const key = date + '|' + ci;
+          if (!origMap[key]) origMap[key] = oldVal;
+        }
+      }
     });
   } catch(e) {}
   return origMap;
@@ -4874,11 +4930,13 @@ function simulateFullYearValidation(adminPassword) {
     const wdRows  = curRows.filter(r=>!r.isHol);
     const holRows = curRows.filter(r=> r.isHol);
     const chkConsec = (label, rows, field) => {
+      // BUG 16 修正：空值時必須重置 pv，否則 A,空,A 會誤報為連續相同
+      // 與 autoValidateSchedule Check 2 邏輯保持一致
       let pv = '';
       rows.forEach((r,i) => {
-        const val = r[field];
+        const val = (r[field] || '').toString().trim();
         if (val && val === pv) errors.push(`[C2] 【${label}連續】${r.ds} 與前日（${rows[i-1].ds}）均為「${val}」`);
-        if (val) pv = val;
+        pv = val; // 空值自動重置為 ''，不保留前次值
       });
     };
     chkConsec('平日值班',    wdRows,  'duty');
