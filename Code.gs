@@ -2630,7 +2630,10 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             // 確認把 assign[j] 放到 slot[i] 後不會再衝突
             const dutyJ = result[slots[j].rowIdx][0] || dutyByDate[slots[j].dk] || '';
             if (assign[i] === dutyJ) continue; // assign[i] 換去 j 位置也會衝突
-            const cnt = swapCounts[assign[j]] || 0;
+            let cnt = swapCounts[assign[j]] || 0;
+            // ★ BUG 26 修正：避免把 slot 0（跨月接續首位）當交換對象，
+            //   否則第一天的人被換走，跨月輪序自檢會失敗
+            if (j === 0) cnt += 9999;
             if (cnt < bestCount) { bestCount = cnt; bestJ = j; }
           }
           if (bestJ !== -1) {
