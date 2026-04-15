@@ -1833,18 +1833,24 @@ function confirmShift(){
       if(!ok){hideLoad();showAlert('員工編號驗證失敗',true);return;}
       var se=el('en').checked;
       var rmk=(el('shiftRemark')?el('shiftRemark').value.trim():'');
-      google.script.run
-        .withSuccessHandler(function(msg){
-          hideLoad();showAlert(msg,false);
-          if(curCell)curCell.textContent=ns;
-          var rem2=el('shiftRemark');if(rem2)rem2.value='';
-          hideM('shiftSelectModal');
-          loadRecs(lastEmp);
-          setTimeout(function(){hideM('scheduleModal');showM('sheetSelectModal');},1000);
-        })
-        .withFailureHandler(function(e){hideLoad();showAlert('更新失敗：'+e.message,true);})
-        // BUG22 修正：傳入 adminPwd（管理員登入後有值），讓管理員可幫他人換班
-        .updateShift(selSheet,curDate,curCol,selOpts,se,eid,rmk,adminPwd||'');
+      // BUG18 修正：包 try-catch，避免同步例外導致 loading 卡住無提示
+      try {
+        google.script.run
+          .withSuccessHandler(function(msg){
+            hideLoad();showAlert(msg,false);
+            if(curCell)curCell.textContent=ns;
+            var rem2=el('shiftRemark');if(rem2)rem2.value='';
+            hideM('shiftSelectModal');
+            loadRecs(lastEmp);
+            setTimeout(function(){hideM('scheduleModal');showM('sheetSelectModal');},1000);
+          })
+          .withFailureHandler(function(e){hideLoad();showAlert('更新失敗：'+e.message,true);})
+          // BUG22 修正：傳入 adminPwd（管理員登入後有值），讓管理員可幫他人換班
+          .updateShift(selSheet,curDate,curCol,selOpts,se,eid,rmk,adminPwd||'');
+      } catch(err) {
+        hideLoad();
+        showAlert('更新失敗：'+(err && err.message ? err.message : err),true);
+      }
     })
     .withFailureHandler(function(e){hideLoad();showAlert('驗證失敗：'+e.message,true);})
     .verifyEmpId(eid);

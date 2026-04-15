@@ -3458,7 +3458,16 @@ function doPost(e) {
     var body = (e && e.postData) ? e.postData.contents : '';
     if (!body) return output;
 
-    var userData = JSON.parse(body);
+    var userData;
+    try {
+      userData = JSON.parse(body);
+    } catch (err) {
+      console.error(err);
+      Logger.log('[doPost] invalid json: ' + err.message);
+      return ContentService
+        .createTextOutput('{"ok":false,"error":"invalid json"}')
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     var event    = userData.events && userData.events[0];
     if (!event || !event.message || event.message.type !== 'text') return output;
 
@@ -3575,7 +3584,14 @@ function processLineEvent(bodyStr) {
   var cfg = getLineBotConfig();
   if (!cfg.token) return;
 
-  var userData = JSON.parse(bodyStr);
+  var userData;
+  try {
+    userData = JSON.parse(bodyStr);
+  } catch (err) {
+    console.error(err);
+    Logger.log('[processLineEvent] invalid json: ' + err.message);
+    return;
+  }
   var event    = userData.events && userData.events[0];
   if (!event) return;
 
@@ -4257,8 +4273,8 @@ function askGemini(question) {
       return text ? ('🤖 ' + text.trim()) : '⚠️ AI 未回傳內容';
     }
 
-    // 三個模型都 429
-    return '⚠️ AI 目前使用人數過多，請稍後再試（免費配額已達上限）';
+    // 三個模型都 429 / 404 或 continue 路徑掉出迴圈 → 保底回傳
+    return '⚠️ AI 服務暫時忙碌，請稍後再試';
 
   } catch(e) {
     Logger.log('[askGemini] ' + e.message);
@@ -4277,7 +4293,13 @@ function sendLineReply(token, replyToken, messages) {
     payload: JSON.stringify({ replyToken: replyToken, messages: messages }),
     muteHttpExceptions: true
   });
-  Logger.log('[sendLineReply] HTTP ' + resp.getResponseCode() + ' | ' + resp.getContentText().substring(0, 200));
+  var code = resp.getResponseCode();
+  Logger.log('[sendLineReply] HTTP ' + code + ' | ' + resp.getContentText().substring(0, 200));
+  if (code < 200 || code >= 300) {
+    console.error('LINE API failed', code, resp.getContentText());
+    return false;
+  }
+  return true;
 }
 
 // =============================================
