@@ -763,23 +763,7 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
     const newShift = newShifts.join(', ');
     if (oldShift === newShift) return '班別未改變，無需更新。';
 
-    // BUG 8+18 修正：驗證換班者身份
-    // 管理員（傳入正確 adminPw）可幫任何人換班；一般員工只能換自己的班
-    if (empId) {
-      const isAdmin = adminPw ? verifyAdminPassword(adminPw) : false;
-      if (!isAdmin) {
-        const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
-        const names  = settingSheet.getRange('I1:I11').getValues().flat().map(n => n ? n.toString().trim() : '');
-        const empIds = settingSheet.getRange('M1:M11').getValues().flat().map(n => n ? n.toString().trim() : '');
-        const empIdx = empIds.indexOf(empId.toString().trim());
-        const staffName = empIdx !== -1 ? names[empIdx] : '';
-        const oldShiftStr = oldShift ? oldShift.toString().trim() : '';
-        if (staffName && oldShiftStr && staffName !== oldShiftStr) {
-          return '⚠️ 只能申請更換自己的班次（您的姓名：' + staffName + '，原班別：' + oldShiftStr + '）';
-        }
-      }
-    }
-
+    // 授權人員（verifyEmpId 已驗證）均可更換任何人的班次，無自身限制
     sheet.getRange(row, shiftColumn).setValue(newShift);
     const headers = sheet.getRange('C1:M1').getValues()[0];
     const shiftType = headers[shiftColumn - 3] || '未知班別';
