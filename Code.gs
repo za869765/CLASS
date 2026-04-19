@@ -828,15 +828,21 @@ function logShiftChange(sheetName, date, oldShift, newShift, shiftType, empId, r
     }
   }
   const logSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-  const logRange = logSheet.getRange('A40:A460').getValues();
+  const logRangeObj = logSheet.getRange('A40:A460');
+  const logRange = logRangeObj.getValues();
   let logRow = 40;
   let found = false;
   for (let i = 0; i < logRange.length; i++) {
     if (logRange[i][0] === "") { logRow = i + 40; found = true; break; }
   }
   if (!found) {
-    for (let i = 40; i < 459; i++) logSheet.getRange(i, 1).setValue(logSheet.getRange(i+1, 1).getValue());
-    logRow = 459;
+    // bug #23 / #25: 原本 419 次個別 setValue/getValue 太慢易超時，且只迴圈到 i<459 → A460 那筆未被覆蓋會殘留。
+    // 改用 getValues/setValues 一次讀寫 + 整段往上 shift 一格，最後一格 A460 由 setValue 寫入新紀錄。
+    const shifted = [];
+    for (let i = 1; i < logRange.length; i++) shifted.push([logRange[i][0]]);
+    shifted.push(['']); // 末位先清空，等下方 setValue 寫入新紀錄
+    logRangeObj.setValues(shifted);
+    logRow = 460;
   }
   const empIdStr = empId ? `(${empId}) ` : '';
   const remarkStr = remark ? ' 備註:' + remark.toString().trim().split('\n').join(' ') : '';
@@ -2995,31 +3001,54 @@ function isPersonExcluded(name, dateObj, exclusions, year) {
 // 有到職日且 joinDate > 排班月最後一天 → 尚未到職，不應排入
 function isStaffActiveForMonth(staffObj, schedYear, schedMonth) {
   // BUG 11 修正：改用完整日期比較（年+月+日），避免跨年誤判
-  // 例如：去年 10 月離職者，排今年 1 月班表，10 > 1 但應視為已離職
-  const parseMDLocal = (str) => {
+  // bug #8: X/Y 欄只存「月/日」沒有年份。原本一律代 schedYear 解讀，
+  //   • 2024/10 離職者，排 2026/1 → leaveFullDate=2026/10/15，不小於 2026/1/1 → 誤判仍在職
+  //   • 2026/10 才到職者，排 2026/1 → joinFullDate=2026/10/15 > 2026/1/31 → 正確（恰好）
+  //   • 但 2025/2 到職、排 2026/1 → joinFullDate=2026/2/15 > 2026/1/31 → 誤判尚未到職
+  // 解法：支援「YYYY/M/D」完整年月日（首選）；若只有 M/D，採「最近過去」推斷年份：
+  //   - 離職日：取 ≤ schedFirstDay 最近的 M/D 那年（即 schedYear 或 schedYear-1）
+  //   - 到職日：取 ≤ schedLastDay 最近的 M/D 那年
+  const parseDateLocal = (str) => {
     if (!str) return null;
-    const m = str.toString().match(/(\d+)\/(\d+)/);
-    return m ? { month: parseInt(m[1]), day: parseInt(m[2]) } : null;
+    const s = str.toString().trim();
+    // 完整 YYYY/M/D 或 YYY/M/D（民國年）
+    const mFull = s.match(/^(\d{3,4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (mFull) {
+      let yr = parseInt(mFull[1]);
+      if (yr < 1900) yr += 1911; // 民國 → 西元
+      return { year: yr, month: parseInt(mFull[2]), day: parseInt(mFull[3]), hasYear: true };
+    }
+    const mMD = s.match(/(\d+)\/(\d+)/);
+    return mMD ? { year: null, month: parseInt(mMD[1]), day: parseInt(mMD[2]), hasYear: false } : null;
   };
-  // 排班月第一天（用於比較「是否已離職」）
-  const schedFirstDay = new Date(schedYear, schedMonth - 1, 1);
 
-  // 離職日檢查：離職日期 < 排班月第一天 → 已離職不排入
+  const schedFirstDay = new Date(schedYear, schedMonth - 1, 1);
+  const schedLastDay  = new Date(schedYear, schedMonth, 0);
+
+  // 離職日檢查：以「最近過去」原則推斷年份
   if (staffObj.leaveDate) {
-    const ld = parseMDLocal(staffObj.leaveDate);
+    const ld = parseDateLocal(staffObj.leaveDate);
     if (ld) {
-      // 用 schedYear 建構完整離職日期（M/D 格式無年份，預設同排班年）
-      const leaveFullDate = new Date(schedYear, ld.month - 1, ld.day);
+      let yr = ld.hasYear ? ld.year : schedYear;
+      let leaveFullDate = new Date(yr, ld.month - 1, ld.day);
+      // 若 M/D 解讀為當年比排班月最後一天還晚 → 表示「實際發生在去年」
+      if (!ld.hasYear && leaveFullDate > schedLastDay) {
+        yr = schedYear - 1;
+        leaveFullDate = new Date(yr, ld.month - 1, ld.day);
+      }
       if (leaveFullDate < schedFirstDay) return false;
     }
   }
-  // 到職日檢查：到職日期 > 排班月最後一天 → 尚未到職
+  // 到職日檢查：相同邏輯
   if (staffObj.joinDate) {
-    const jd = parseMDLocal(staffObj.joinDate);
+    const jd = parseDateLocal(staffObj.joinDate);
     if (jd) {
-      // 排班月最後一天
-      const schedLastDay = new Date(schedYear, schedMonth, 0);
-      const joinFullDate = new Date(schedYear, jd.month - 1, jd.day);
+      let yr = jd.hasYear ? jd.year : schedYear;
+      let joinFullDate = new Date(yr, jd.month - 1, jd.day);
+      if (!jd.hasYear && joinFullDate > schedLastDay) {
+        yr = schedYear - 1;
+        joinFullDate = new Date(yr, jd.month - 1, jd.day);
+      }
       if (joinFullDate > schedLastDay) return false;
     }
   }
@@ -4442,8 +4471,9 @@ function fixAllSheetDateFormats() {
 // errorNote: 退回時的錯誤說明（reject 才用）
 // checkedItems: 已勾選的驗算項目（array of strings）
 function auditSchedule(empId, sheetName, action, errorNote, checkedItems) {
-  // 核准需要驗證員工編號；退回不需要（直接以說明發送通知）
-  if (action === 'approve' && !verifyEmpId(empId)) {
+  // bug #7: reject 會 deleteSheet 整月班表，原本完全沒驗證可被任意呼叫造成資料毀滅。
+  // 改為 reject 也須通過 verifyEmpId（與 approve 對稱）。
+  if ((action === 'approve' || action === 'reject') && !verifyEmpId(empId)) {
     return { success: false, message: '員工編號驗證失敗，請重新輸入。' };
   }
   try {
@@ -4585,6 +4615,28 @@ function buildOriginalScheduleMap(prevSheetName) {
     if (!sh) return origMap;
     const hdrs = sh.getRange('C1:M1').getValues()[0].map(h => h.toString().trim());
 
+    // bug #22: 與 getScheduleChanges 對齊 — 舊日誌可能寫「值班人員/登革熱二線/協助掛號」，
+    // 新 header 為「值班/停班2線/支援」。原本只用 hdrs.indexOf 直接比對拿不到，
+    // origMap 缺值 → autoValidateSchedule Check 1 跨月輪序誤判。
+    const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援' };
+    const resolveHdrIdx = (name) => {
+      let ci = hdrs.indexOf(name);
+      if (ci !== -1) return ci;
+      const mapped = LEGACY_HDR[name];
+      if (mapped) {
+        ci = hdrs.indexOf(mapped);
+        if (ci !== -1) return ci;
+      }
+      // 反向：log 寫新名、sheet header 還是舊名
+      for (const oldName in LEGACY_HDR) {
+        if (LEGACY_HDR[oldName] === name) {
+          ci = hdrs.indexOf(oldName);
+          if (ci !== -1) return ci;
+        }
+      }
+      return -1;
+    };
+
     logs.forEach(log => {
       const s = log.toString().trim();
 
@@ -4593,7 +4645,7 @@ function buildOriginalScheduleMap(prevSheetName) {
       const m1 = s.match(/^(\d+\/\d+)\s+週.\s+(.+?)\s+原(.+?)→新(.+?)\s+(?:\([^)]+\)\s+)?更換時間:/);
       if (m1) {
         const [, date, shiftType, oldVal] = m1;
-        const ci = hdrs.indexOf(shiftType);
+        const ci = resolveHdrIdx(shiftType);
         if (ci !== -1) {
           const key = date + '|' + ci;
           if (!origMap[key]) origMap[key] = oldVal;
@@ -4608,7 +4660,7 @@ function buildOriginalScheduleMap(prevSheetName) {
       const m2 = s.match(/^(?:排班|審核)-.+?\s+(\d+\/\d+)\s+(.+?)\s+原(.+?)→新(.+?)\s+更換時間:/);
       if (m2) {
         const [, date, shiftType, oldVal] = m2;
-        const ci = hdrs.indexOf(shiftType);
+        const ci = resolveHdrIdx(shiftType);
         if (ci !== -1) {
           const key = date + '|' + ci;
           if (!origMap[key]) origMap[key] = oldVal;
@@ -5341,12 +5393,14 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
       if (i === logRange.length - 1) logRow = 460;
     }
 
-    // ★ 建立去重集合：從現有日誌提取「排班者+日期+欄位+原→新」作為 key
-    // 格式：「排班-XXX D/D 欄位 原A→新B」（忽略時間和備註）
+    // ★ 建立去重集合：從現有日誌提取「排班者/審核者+日期+欄位+原→新」作為 key
+    // 格式：「排班-XXX D/D 欄位 原A→新B」或「審核-XXX D/D 欄位 原A→新B」（忽略時間和備註）
+    // bug #21: 原本 startsWith('排班-') filter 把所有「審核-」前綴的紀錄排除在 dedup 之外，
+    // 審核者反覆寫入相同變更會無限重複堆疊，擠掉舊換班日誌。
     const existingKeys = new Set();
     logRange.forEach(row => {
       const s = (row[0] || '').toString().trim();
-      if (!s.startsWith('排班-')) return;
+      if (!s.startsWith('排班-') && !s.startsWith('審核-')) return;
       // 擷取「排班-XXX D/D 欄位 原A→新B」這段（更換時間之前）
       const keyMatch = s.match(/^((排班|審核)-.+?\s+\d+\/\d+\s+.+?\s+原.+?→新.+?)\s+更換時間/);
       if (keyMatch) existingKeys.add(keyMatch[1]);
@@ -5406,19 +5460,32 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows) {
     sheet.getRange(2, 3, rows.length, 11).setValues(rows); // C2:M(2+n)
 
     // Update N1 note
+    // bug #24: 原本只 parse「審核狀態:」「writeCount:」，遇到 runAutoSchedule 累積寫入的
+    //   「swapCount:」「公平性指標」等其他行就被丟棄。重寫 N1 後，跨月挪移計數歸零，
+    //   下次自動排班 assignSlotsWithPointer 公平性會從 0 重來，長期挪移集中到少數人。
+    //   保留所有不認識的行原樣寫回。
     const tz = spreadsheet.getSpreadsheetTimeZone();
     const ts = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
-    let existNote = '';
     let wc = 0;
+    const passthroughLines = [];
     try {
       const old = sheet.getRange('N1').getNote() || '';
       old.split('\n').forEach(function(l){
-        if(l.startsWith('審核狀態:')) existNote = l.trim();
-        if(l.startsWith('writeCount:')) wc = parseInt(l.replace('writeCount:','').trim())||0;
+        const trimmed = l.trim();
+        if (!trimmed) return;
+        if (trimmed.startsWith('writeCount:')) {
+          wc = parseInt(trimmed.replace('writeCount:','').trim())||0;
+          return;
+        }
+        // 排定時間 / 審核狀態 由本函式重寫，不沿用
+        if (trimmed.startsWith('排定時間:') || trimmed.startsWith('審核狀態:')) return;
+        // 其他行（含 swapCount、公平性、自訂備註）一律保留
+        passthroughLines.push(trimmed);
       });
     } catch(e2){}
     const letter = wcToLetter(wc + 1);
-    const newNote = `排定時間: ${ts}\n審核狀態:pending\nwriteCount: ${wc+1}`.trim();
+    const baseLines = [`排定時間: ${ts}`, `審核狀態:pending`, `writeCount: ${wc+1}`];
+    const newNote = baseLines.concat(passthroughLines).join('\n');
     sheet.getRange('N1').setNote(newNote);
     sheet.getRange('N1').setValue(sheetName + '　' + letter);
 
