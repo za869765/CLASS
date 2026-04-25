@@ -699,13 +699,13 @@ input[type=button]:active,button:active{transform:scale(.97)}
         <div style="text-align:center;margin:8px 0 24px">
           <div style="font-size:.95rem;color:#666;font-weight:700;margin-bottom:14px">📋 待審核班表區</div>
           <div style="display:inline-block;position:relative">
-            <button id="pendingRefreshBtn" class="qk-square-btn" onclick="refreshPendingReview(this)"
+            <button id="pendingRefreshBtn" class="qk-square-btn pending-refresh-hint" onclick="refreshPendingReview(this)"
               style="background:linear-gradient(135deg,#0d47a1,#1565c0,#0288d1);color:#fff;font-size:1.05rem;font-weight:900;border-radius:22px;padding:0;margin:0;width:200px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;letter-spacing:.5px;box-shadow:0 8px 28px rgba(13,71,161,.45),0 0 0 0 rgba(255,255,255,.7);cursor:pointer;border:none;transition:transform .25s,box-shadow .25s;animation:qkPulseRing 2s ease-out infinite">
               <span style="font-size:3.4rem;line-height:1">🔍</span>
               <span style="font-size:1.15rem">查詢</span>
               <span style="font-size:.85rem;color:rgba(255,255,255,.85);font-weight:700">待審核班表</span>
             </button>
-            <span class="qk-finger-hint" style="position:absolute;right:-26px;bottom:-20px;font-size:3rem;pointer-events:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));animation:qkFingerTap 1.4s ease-in-out infinite">👆</span>
+            <span id="pendingRefreshFinger" class="qk-finger-hint" style="position:absolute;right:-26px;bottom:-20px;font-size:3rem;pointer-events:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));animation:qkFingerTap 1.4s ease-in-out infinite">👆</span>
           </div>
         </div>
         <!-- 待審核班表（自動載入）-->
@@ -2333,7 +2333,9 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
   var savedCellMap = savedDrags.length ? JSON.parse(JSON.stringify(_fpCellMap)) : {};
 
   _fpPreviewData = { headers: headers, preview: preview, dates: dates, holRows: holRows,
-    clinicStaff: r.clinicStaff || [] };
+    clinicStaff: r.clinicStaff || [],
+    // ver4.7：把停班2線系統挪移資訊存入，供異動清單顯示
+    dengSwapped: r.dengSwapped || [], dengSwapDateMap: r.dengSwapDateMap || {} };
   _fpDragMode    = true;
   initFpCellMap();
 
@@ -2819,8 +2821,11 @@ function updateFpDragPanel(){
   var newChanges = _fpDragChanges.filter(function(d){ return !d.isPreloaded; });
   var n = newChanges.length + (_fpDragChanges.length - newChanges.length > 0 ? 1 : 0); // 有preloaded就+1行說明
   cnt.textContent = newChanges.length; // 只計新異動
-  panel.style.display = _fpDragChanges.length > 0 ? 'block' : 'none';
-  if(!_fpDragChanges.length){ list.innerHTML=''; buildFpStats(); return; }
+  // ver4.7：是否有系統挪移列（停班2線 swap）
+  var swapList = (_fpPreviewData && _fpPreviewData.dengSwapped) ? _fpPreviewData.dengSwapped : [];
+  var hasSwap  = swapList.length > 0;
+  panel.style.display = (_fpDragChanges.length > 0 || hasSwap) ? 'block' : 'none';
+  if(!_fpDragChanges.length && !hasSwap){ list.innerHTML=''; buildFpStats(); return; }
   list.innerHTML = _fpDragChanges.map(function(r,i){
     var isSingleReplace = (r.srcRow===r.dstRow && r.srcCi===r.dstCi);
     var srcChanged = r.srcOrig !== r.srcNew;
@@ -2830,23 +2835,57 @@ function updateFpDragPanel(){
     if(dstChanged && !(r.srcDate===r.dstDate&&r.srcHdr===r.dstHdr&&r.srcOrig===r.dstNew&&r.dstOrig===r.srcNew&&!srcChanged))
       desc += r.dstDate+' '+r.dstHdr+' '+x(r.dstOrig||'–')+'→'+x(r.dstNew||'–');
     if(r.isPreloaded){
-      // 排班者已有異動：唯讀展示，淡底色，不可刪除
-      return '<div style="display:flex;align-items:center;gap:6px;background:#fefce8;border:1px dashed #fbbf24;border-radius:6px;padding:4px 8px;font-size:.74rem;opacity:.85">'
-        +'<span style="flex:1;color:#78350f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+desc.trim()
-        +(r.reason?' <span style="color:#a16207;font-size:.68rem">（備：'+x(r.reason)+'）</span>':'')+'</span>'
-        +(r.isAuditLog
-          ? '<span style="flex-shrink:0;font-size:.65rem;color:#1e3a8a;background:#dbeafe;border-radius:3px;padding:1px 5px">審核者</span>'
-          : '<span style="flex-shrink:0;font-size:.65rem;color:#92400e;background:#fde68a;border-radius:3px;padding:1px 5px">排班者</span>')
+      // ver4.7：排班者既有異動 → 反白唯讀（淡黃底 + 鎖頭 + 灰階淡化），審核者只能看不能改
+      // 若 isAuditLog 表示這筆 preloaded 是別的審核者留下的（極少見），用藍框
+      var preIsAudit = !!r.isAuditLog;
+      var preBorder  = preIsAudit ? '#3b82f6' : '#d97706';
+      var preBg      = preIsAudit ? '#eff6ff' : '#fef9c3';
+      var preColor   = preIsAudit ? '#1e3a8a' : '#78350f';
+      var preTagBg   = preIsAudit ? '#dbeafe' : '#fde68a';
+      var preTagColor= preIsAudit ? '#1e3a8a' : '#92400e';
+      var preLabel   = preIsAudit ? '審核者' : '排班者';
+      return '<div style="display:flex;align-items:center;gap:6px;background:'+preBg+';border:1.5px dashed '+preBorder+';border-radius:7px;padding:5px 9px;font-size:.74rem;filter:saturate(.9);position:relative">'
+        +'<span style="flex-shrink:0;font-size:.85rem;line-height:1">🔒</span>'
+        +'<span style="flex:1;color:'+preColor+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">'+desc.trim()
+        +(r.reason?' <span style="color:#a16207;font-size:.68rem;font-weight:400">（備：'+x(r.reason)+'）</span>':'')+'</span>'
+        +'<span style="flex-shrink:0;font-size:.65rem;color:'+preTagColor+';background:'+preTagBg+';border-radius:4px;padding:2px 7px;font-weight:700;letter-spacing:.5px">'+preLabel+'·唯讀</span>'
         +'</div>';
     }
-    return '<div style="display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #ffe082;border-radius:6px;padding:5px 8px;font-size:.76rem">'
+    // ver4.7：本次新異動 — 審核者藍色框，排班者黃色框（與 preloaded 反白同調）
+    var isAuditNew = !!_fpAuditMode;
+    var newBorder = isAuditNew ? '#3b82f6' : '#fbbf24';
+    var newBg     = isAuditNew ? '#eff6ff' : '#fff';
+    var newTagBg  = isAuditNew ? '#dbeafe' : '#fde68a';
+    var newTagFg  = isAuditNew ? '#1e3a8a' : '#92400e';
+    var newLabel  = isAuditNew ? '審核者' : '排班者';
+    var newInputBg = isAuditNew ? '#eff6ff' : '#fffde7';
+    return '<div style="display:flex;align-items:center;gap:6px;background:'+newBg+';border:1.5px solid '+newBorder+';border-radius:7px;padding:5px 9px;font-size:.76rem">'
+      +'<span style="flex-shrink:0;font-size:.65rem;color:'+newTagFg+';background:'+newTagBg+';border-radius:4px;padding:2px 7px;font-weight:700;letter-spacing:.5px">'+newLabel+'</span>'
       +'<span style="flex:1;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+desc.trim()+'</span>'
       +'<input type="text" placeholder="理由（選填）" maxlength="50" value="'+x(r.reason||'')+'" '
       +'oninput="_fpDragChanges['+i+'].reason=this.value" '
-      +'style="width:100px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;font-size:.74rem;background:#fffde7;min-width:0;outline:none;flex-shrink:0">'
+      +'style="width:100px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;font-size:.74rem;background:'+newInputBg+';min-width:0;outline:none;flex-shrink:0">'
       +'<button onclick="removeFpDrag('+i+')" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:.85rem;padding:0;width:auto;box-shadow:none;flex-shrink:0">✕</button>'
       +'</div>';
   }).join('');
+  // ver4.7：append 系統挪移（停班2線）橙色塊，每列一筆
+  if(hasSwap && _fpPreviewData){
+    var dates2 = _fpPreviewData.dates || [];
+    var swapDateMap2 = _fpPreviewData.dengSwapDateMap || {};
+    var preview2 = _fpPreviewData.preview || [];
+    var swapHtml = swapList.map(function(rowIdx){
+      var ds = (dates2[rowIdx] && dates2[rowIdx][0]) ? dates2[rowIdx][0] : '';
+      var origDate = swapDateMap2[rowIdx] || swapDateMap2[String(rowIdx)] || '';
+      var curName = (preview2[rowIdx] && preview2[rowIdx][10]) || '';
+      return '<div style="display:flex;align-items:center;gap:6px;background:#fff3e0;border:1.5px solid #f57c00;border-radius:7px;padding:5px 9px;font-size:.74rem;filter:saturate(.95)">'
+        +'<span style="flex-shrink:0;font-size:.85rem;line-height:1">⚙️</span>'
+        +'<span style="flex:1;color:#5d4037;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+x(ds)+' 停班2線「'+x(curName)+'」'
+        +(origDate?' <span style="color:#a16207;font-size:.68rem">（原本應排於 '+x(origDate)+'）</span>':'')+'</span>'
+        +'<span style="flex-shrink:0;font-size:.65rem;color:#bf360c;background:#ffe0b2;border-radius:4px;padding:2px 7px;font-weight:700;letter-spacing:.5px">系統挪移</span>'
+        +'</div>';
+    }).join('');
+    list.innerHTML += swapHtml;
+  }
 }
 
 function removeFpDrag(idx){
