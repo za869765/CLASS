@@ -2651,6 +2651,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         if (!prevSh) return 0;
         const origMap2 = buildOriginalMap(prevSN);
         const prevD2   = prevSh.getRange('A2:M32').getValues();
+        // ver4.6：讀上月 M 欄 swap note，跳過系統挪移的列（避免下月接續找錯起點）
+        const prevMNotes = prevSh.getRange('M2:M32').getNotes();
         let lastName = '';
         for (let r = 0; r < prevD2.length; r++) {
           const rawA = prevD2[r][0];
@@ -2659,6 +2661,9 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           else { const mm = rawA ? rawA.toString().match(/(\d+)\/(\d+)/) : null; if(mm) try { pd = new Date(prevY2, parseInt(mm[1])-1, parseInt(mm[2])); } catch(e){} }
           if (!pd) continue;
           if (prevIsHol !== isHoliday(pd)) continue; // 只看對應類型
+          // 系統挪移列（'swap:M/d' note）→ 跳過，找真正輪序的最後一位
+          const mNote = (prevMNotes[r] && prevMNotes[r][0]) ? prevMNotes[r][0].toString() : '';
+          if (mNote.indexOf('swap:') === 0) continue;
           const ds2 = Utilities.formatDate(pd, tz2, 'M/d');
           // ★ M欄（停班2線）在 A2:M32 中是 index 12，不是 10
           const cv2 = prevD2[r][12] ? prevD2[r][12].toString().trim() : '';
@@ -2741,7 +2746,11 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       const swapCountStr = Object.keys(swapCounts).length > 0
         ? '\nswapCount:' + Object.keys(swapCounts).map(n => n+'='+swapCounts[n]).join(',')
         : '';
-      const newNote = '排定時間:' + schedTimeStr + '\n審核狀態:pending\nwriteCount:' + writeCount + swapCountStr;
+      // ver4.6：記錄停班2線系統挪移列（rowIdx → 原日期），讓自檢/前端識別非 bug
+      const dengSwapStr = Object.keys(dengSwapDateMap).length > 0
+        ? '\ndengSwapRows:' + Object.keys(dengSwapDateMap).map(rIdx => rIdx+'='+dengSwapDateMap[rIdx]).join(',')
+        : '';
+      const newNote = '排定時間:' + schedTimeStr + '\n審核狀態:pending\nwriteCount:' + writeCount + swapCountStr + dengSwapStr;
       sheet.getRange('N1').setNote(newNote);
 
       // ★ 將挪移資訊寫入儲存格備註（M欄 = 登革熱二線，欄序13）

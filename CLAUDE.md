@@ -15,11 +15,11 @@
 |------|------|
 | 前端 | `index.html` |
 | 後端 | `Code.gs` |
-| 內部版號 | ver4.5（2026-04-19 修 BUG27~33：audit reject 驗證/跨年在職/日誌去重+批次/拖曳 note 保留） |
+| 內部版號 | ver4.6（2026-04-25 修 BUG34~38：拖曳寫入流失/UI 重構/權限放寬/swap 識別） |
 
 ---
 
-## 已修正 BUG 清單（共 25 項，三輪測試）
+## 已修正 BUG 清單（共 31 項，五輪測試）
 
 ### 第一輪（BUG1~16）
 | # | 類別 | 摘要 |
@@ -59,6 +59,15 @@
 |---|------|------|
 | 26 | 排班 | `assignSlotsWithPointer` swap 選 bestJ 時未保護 slot 0 → 跨月接續首位被換走，輪序自檢失敗 |
 
+### 第五輪（BUG34~38，ver4.6）
+| # | 類別 | 摘要 |
+|---|------|------|
+| 34 | 寫入 | 一鍵排班預覽中拖曳挪移後，使用者關閉預覽 Modal 時 `closeFpModal` 清空 `_fpDragChanges`，再點外部 `qkConfirmBtn` 走 `quickSchedule('execute')` 寫入會用原版排班，挪移完全遺失 → **將「確認寫入」按鈕從外部移進預覽 Modal**，使用者不必關閉就能寫入 |
+| 35 | UI | 預覽 Modal 右上角紅色 X 移除；下方按鈕重排為 [取消] [確認寫入]；寫入成功後變身為 [✅ 完成關閉] [🖨️ 核章列印]；「完成關閉」直接導向待審核分頁並刷新清單 |
+| 36 | UI | 後台分頁重構：「⚡ 一鍵排班」獨立成最左側分頁、「📋 待審核班表」獨立成第二分頁、移除「建立班表」與「自動排班」分頁避免誤按；左側獨立容器移除，改為單欄佈局 |
+| 37 | 權限 | 拖曳挪移權限放寬：原本排班者僅能挪門診相關職務，審核者能挪所有；改為**排班者與審核者皆可挪移所有職務**（含值班/支援/停班2線） |
+| 38 | 識別 | 停班2線系統自動挪移加識別：(a) 後端 N1 note 加 `dengSwapRows:rIdx=M/d,...` 紀錄，(b) M 欄 cell note 已寫 `swap:M/d`（既有），(c) 前端預覽橙底格 hover 顯示「⚙️ 系統自動挪移」+原日期，(d) 圖例新增「⚙️ 系統挪移（停班2線）」說明，(e) `getPrevLastPtr` 跳過 swap 列，避免下月接續找錯起點 |
+
 ---
 
 ## 架構升級摘要
@@ -66,6 +75,10 @@
 - **年份全面動態化**：`parseYearMonthFromSheetName` 通用解析 + `rocStrToNum` 反向函式
 - **假日多年度支援**：`GOV_HOLIDAYS` Map 結構，每年初需補充放假日資料
 - **換班身份驗證**：`updateShift` 加入 `adminPw` 可選參數，管理員可幫他人換班
+- **ver4.6 後台單欄分頁**：移除左側獨立容器，所有功能集中於 `adminTabs`；`tab-quick`（一鍵排班入口+進階工具）+ `tab-pending`（待審核班表清單）+ 既有 5 個 tab；移除 `tab-create`/`tab-sched`
+- **ver4.6 預覽 Modal 寫入流程**：`showFullPreview` 一律帶 callback；`fpWriteBtn` 寫入成功後變身為「🖨️ 核章列印」、`fpCancelBtn` 變身為「✅ 完成關閉」並導向 `tab-pending`；右上角 `fpClose` 已移除
+- **ver4.6 拖曳權限放寬**：`makeFpTableDraggable`/`makeFpTableAddable` 不再依 `_fpAuditMode` 區分排班者/審核者，所有人皆可挪移所有職務
+- **ver4.6 停班2線系統挪移識別**：N1 note 加 `dengSwapRows:rIdx=M/d`；前端 hover 顯示原日期；`getPrevLastPtr` 讀 M 欄 swap note 跳過挪移列
 
 ---
 
