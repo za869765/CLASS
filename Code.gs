@@ -5505,7 +5505,7 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
 
 // ── 寫入已拖曳調整的預覽資料（直接覆蓋排班欄 C:M）──────────────────
 // previewRows: [[col0..col10], ...] 同 runAutoSchedule 的 result 格式
-function writeDraggedPreview(sheetName, adminPassword, previewRows) {
+function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
     const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
@@ -5523,6 +5523,21 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows) {
 
     sheet.getRange('A2:A32').setNumberFormat('@');
     sheet.getRange(2, 3, rows.length, 11).setValues(rows); // C2:M(2+n)
+
+    // ver4.7：寫入停班2線系統挪移 cell note (M 欄)，避免 swap 紀錄遺失
+    // swapInfo: { dengSwapped: [rowIdx,...], dengSwapDateMap: { rowIdx: 'M/d', ... } }
+    const dengSwapMap = (swapInfo && swapInfo.dengSwapDateMap) ? swapInfo.dengSwapDateMap : {};
+    try {
+      const mCol = sheet.getRange('M2:M32');
+      mCol.clearNote();
+      Object.keys(dengSwapMap).forEach(function(idxStr){
+        const idx = parseInt(idxStr);
+        const origDate = dengSwapMap[idxStr];
+        if (!isNaN(idx) && origDate && rows[idx] && rows[idx][10]) {
+          sheet.getRange(idx + 2, 13).setNote('swap:' + origDate);
+        }
+      });
+    } catch(eSwap) {}
 
     // Update N1 note
     // bug #24: 原本只 parse「審核狀態:」「writeCount:」，遇到 runAutoSchedule 累積寫入的
@@ -5544,17 +5559,25 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows) {
         }
         // 排定時間 / 審核狀態 由本函式重寫，不沿用
         if (trimmed.startsWith('排定時間:') || trimmed.startsWith('審核狀態:')) return;
+        // ver4.7：dengSwapRows 由本函式依當前 swapInfo 重寫，舊的不沿用
+        if (trimmed.startsWith('dengSwapRows:')) return;
         // 其他行（含 swapCount、公平性、自訂備註）一律保留
         passthroughLines.push(trimmed);
       });
     } catch(e2){}
     const letter = wcToLetter(wc + 1);
     const baseLines = [`排定時間: ${ts}`, `審核狀態:pending`, `writeCount: ${wc+1}`];
+    // ver4.7：把當前 swap 資訊寫入 N1 note (dengSwapRows 行)
+    const swapKeys = Object.keys(dengSwapMap);
+    if (swapKeys.length > 0) {
+      const swapStr = 'dengSwapRows:' + swapKeys.map(function(k){ return k + '=' + dengSwapMap[k]; }).join(',');
+      baseLines.push(swapStr);
+    }
     const newNote = baseLines.concat(passthroughLines).join('\n');
     sheet.getRange('N1').setNote(newNote);
     sheet.getRange('N1').setValue(sheetName + '　' + letter);
 
-    writeOpLog('排班寫入（拖曳調整）', `${sheetName} 寫入 ${rows.length} 列`);
+    writeOpLog('排班寫入（拖曳調整）', `${sheetName} 寫入 ${rows.length} 列，swap ${swapKeys.length} 筆`);
     return {
       success: true,
       message: `${sheetName} 排班完成（含拖曳調整）！（共 ${rows.length} 天）`,

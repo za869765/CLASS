@@ -3981,7 +3981,9 @@ function previewPendingSheet(sheetName){
             }
           })
           .withFailureHandler(function(e){ if(cb) cb('寫入失敗：'+e.message, false); })
-          .writeDraggedPreview(sheetName, pw, preview || (_fpPreviewData && _fpPreviewData.preview));
+          .writeDraggedPreview(sheetName, pw, preview || (_fpPreviewData && _fpPreviewData.preview),
+            { dengSwapped: (_fpPreviewData && _fpPreviewData.dengSwapped) || [],
+              dengSwapDateMap: (_fpPreviewData && _fpPreviewData.dengSwapDateMap) || {} });
       };
       showFullPreview(r, sheetName, sub, auditWriteCallback, wcLetter);
     })
@@ -5502,6 +5504,11 @@ function _qkPreviewWriteCallback(cb, draggedPreview){
   var monthName = el('qkMonthSel').value;
   var year = Number(el('qkYearSel').value);
   if(draggedPreview){
+    // ver4.7：把停班2線系統挪移資訊一起傳給後端，避免寫入後 swap 紀錄遺失
+    var swapInfo = {
+      dengSwapped: (_fpPreviewData && _fpPreviewData.dengSwapped) || [],
+      dengSwapDateMap: (_fpPreviewData && _fpPreviewData.dengSwapDateMap) || {}
+    };
     google.script.run
       .withSuccessHandler(function(r){
         var ok = r && r.success !== false;
@@ -5509,7 +5516,7 @@ function _qkPreviewWriteCallback(cb, draggedPreview){
         cb((ok?'🎉 ':'⚠️ ')+msg, ok);
       })
       .withFailureHandler(function(e){ cb('寫入失敗：'+e.message, false); })
-      .writeDraggedPreview(monthName, adminPwd, draggedPreview);
+      .writeDraggedPreview(monthName, adminPwd, draggedPreview, swapInfo);
   } else {
     google.script.run
       .withSuccessHandler(function(r){
