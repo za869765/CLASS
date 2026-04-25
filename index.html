@@ -468,13 +468,18 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <button id="fpWriteBtn" style="flex:1;font-size:1rem;font-weight:900;padding:14px;background:linear-gradient(90deg,#2e7d32,#43a047)">✅ 確認寫入</button>
       <button id="fpCancelBtn" style="flex:1;font-size:1rem;padding:14px;background:linear-gradient(90deg,#90a4ae,#607d8b)">取消</button>
     </div>
-    <!-- ver4.6 寫入成功彈窗：覆蓋於預覽 Modal 內，閃 ~2.4 秒後自動淡出 -->
+    <!-- ver4.7 寫入成功彈窗：尺寸放大 2 倍、自動關閉延長 1 倍（8 秒）、文字引導加強 -->
     <div id="fpWriteSuccessOverlay" style="display:none;position:absolute;inset:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);align-items:center;justify-content:center;border-radius:16px">
-      <div style="background:#fff;border:3px solid #43a047;border-radius:24px;padding:34px 44px;text-align:center;box-shadow:0 20px 60px rgba(46,125,50,.32);max-width:90%;animation:popBounce .55s cubic-bezier(.34,1.56,.64,1) both">
-        <div style="font-size:3.2rem;margin-bottom:10px;animation:popBounce .6s ease .12s both">🎉</div>
-        <div style="font-weight:900;font-size:1.35rem;color:#1b5e20;margin-bottom:8px;letter-spacing:.5px">排班已成功寫入！</div>
-        <div style="font-size:.9rem;color:#444;line-height:1.7;margin-bottom:14px">下一步請選擇：<br><b style="color:#0d47a1">🖨️ 核章列印</b>　或　<b style="color:#2e7d32">✅ 完成關閉</b>（前往待審核分頁）</div>
-        <button id="fpWriteSuccessOk" style="background:linear-gradient(90deg,#2e7d32,#43a047);color:#fff;font-size:.95rem;font-weight:900;border-radius:12px;padding:11px 36px;margin:0;width:auto;box-shadow:0 4px 14px rgba(46,125,50,.3)">知道了</button>
+      <div style="background:#fff;border:5px solid #43a047;border-radius:36px;padding:64px 80px;text-align:center;box-shadow:0 28px 90px rgba(46,125,50,.4);max-width:95%;animation:popBounce .55s cubic-bezier(.34,1.56,.64,1) both">
+        <div style="font-size:6rem;margin-bottom:18px;animation:popBounce .6s ease .12s both">🎉</div>
+        <div style="font-weight:900;font-size:2.4rem;color:#1b5e20;margin-bottom:18px;letter-spacing:1px">排班已成功寫入！</div>
+        <div style="font-size:1.2rem;color:#333;line-height:2;margin-bottom:28px;padding:0 12px">
+          點選 <b style="color:#0d47a1;background:#e3f2fd;padding:2px 12px;border-radius:8px">🖨️ 核章列印</b> 按鈕<br>
+          列印紙本核章 後<br>
+          點選 <b style="color:#2e7d32;background:#e8f5e9;padding:2px 12px;border-radius:8px">✅ 完成關閉</b> 按鈕<br>
+          直接傳送至 <b style="color:#bf360c">待審核分頁</b> 喔！
+        </div>
+        <button id="fpWriteSuccessOk" style="background:linear-gradient(90deg,#2e7d32,#43a047);color:#fff;font-size:1.4rem;font-weight:900;border-radius:18px;padding:18px 64px;margin:0;width:auto;box-shadow:0 8px 24px rgba(46,125,50,.4);letter-spacing:1px">知道了</button>
       </div>
     </div>
   </div>
@@ -2500,8 +2505,8 @@ function bindFullPreview(){
         var okBtn = el('fpWriteSuccessOk');
         var _hideSov = function(){ sov.style.display = 'none'; };
         if(okBtn) okBtn.onclick = _hideSov;
-        // 4 秒後自動淡出（使用者沒按也會關）
-        setTimeout(_hideSov, 4000);
+        // ver4.7：8 秒後自動淡出（讓使用者有充足時間閱讀引導文字）
+        setTimeout(_hideSov, 8000);
       }
     }
     // 只計新增的異動（排除 preloaded）
