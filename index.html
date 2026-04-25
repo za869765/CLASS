@@ -665,53 +665,6 @@ input[type=button]:active,button:active{transform:scale(.97)}
           </button>
         </div>
 
-        <!-- ── 進階工具（預設收合，少用）── -->
-        <div style="margin-bottom:14px">
-          <button id="advToolsToggle" onclick="toggleAdvTools()" style="background:linear-gradient(90deg,#90a4ae,#78909c);font-size:.82rem;margin:0;padding:8px 18px;width:auto;border-radius:20px;display:flex;align-items:center;gap:6px">
-            <span id="advToolsIcon" style="font-size:1rem;transition:transform .25s">＋</span>
-            <span>工作表建立 / 進階工具</span>
-          </button>
-        </div>
-        <div id="advToolsPanel" style="display:none;animation:advIn .22s ease">
-
-        <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:12px;padding:14px;margin-bottom:14px;border:2px solid #a5d6a7">
-          <strong style="color:#2e7d32;font-size:.94rem">📋 批次建立下個月到當年12月</strong>
-          <p style="font-size:.79rem;color:#555;margin:6px 0 10px">工作表名稱格式：<code style="background:#f0f0f0;padding:1px 6px;border-radius:4px">{rm}</code>=中文月份 <code style="background:#f0f0f0;padding:1px 6px;border-radius:4px">{ry}</code>=民國年</p>
-          <input type="text" id="namePattern" placeholder="一百一十五年{rm}月班表" style="width:100%;padding:8px 12px;border:1.5px solid #a5d6a7;border-radius:8px;font-size:.9rem;background:#fafafa;outline:none;margin-bottom:10px;font-family:var(--f)">
-          <button id="createAllBtn" style="background:linear-gradient(90deg,#2e7d32,#43a047);margin:0">📋 批次建立所有月份工作表</button>
-          <div id="createAllMsg" style="margin-top:8px;font-size:.82rem;font-weight:600;display:none"></div>
-          <div id="createAllRes" style="display:none;margin-top:8px;flex-direction:column;gap:3px;max-height:200px;overflow-y:auto"></div>
-        </div>
-
-        <div style="background:#f3f4fb;border-radius:12px;padding:14px;border:1px solid #c5cae9">
-          <strong style="color:#3949ab;font-size:.9rem">📄 建立單月工作表</strong>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
-            <div>
-              <label style="font-size:.8rem;color:#666;display:block;margin-bottom:4px">西元年</label>
-              <input type="number" id="cYear" value="2026" min="2025" max="2030" style="width:100%;padding:8px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.9rem;background:#fafafa;outline:none">
-            </div>
-            <div>
-              <label style="font-size:.8rem;color:#666;display:block;margin-bottom:4px">月份</label>
-              <select id="cMonth" style="width:100%;padding:8px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.9rem;background:#fafafa;outline:none">
-                <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
-                <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
-                <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
-              </select>
-            </div>
-          </div>
-          <label style="font-size:.8rem;color:#666;display:block;margin-bottom:4px">工作表名稱</label>
-          <input type="text" id="cName" placeholder="例：一百一十五年四月班表" style="width:100%;padding:8px 12px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.9rem;background:#fafafa;outline:none;margin-bottom:10px;font-family:var(--f)">
-          <button id="createOneBtn" style="background:linear-gradient(90deg,#3949ab,#5c6bc0);margin:0">📄 建立此月工作表</button>
-          <div id="createOneMsg" style="margin-top:8px;font-size:.82rem;font-weight:600;display:none"></div>
-        </div>
-
-        <div style="margin-top:12px">
-          <button id="refreshSheetsBtn" style="background:linear-gradient(90deg,#546e7a,#78909c);margin:0;font-size:.85rem">🔄 重新整理工作表清單</button>
-          <div id="sheetsList" style="margin-top:8px;font-size:.82rem;color:#555;display:none"></div>
-        </div>
-
-        </div><!-- end advToolsPanel -->
-
       </div>
 
       <!-- 待審核班表 -->
@@ -1548,34 +1501,25 @@ function bind(){
   el('nsel').onchange        = function(){ loadNotifyDates(); };
   el('nPreviewBtn').onclick  = previewNotifyDay;
   el('snBtn').onclick        = sendManualNotify;
-  el('createAllBtn').onclick=createAll;
-  el('createOneBtn').onclick=createOne;
-  el('refreshSheetsBtn').onclick=refreshSheetsList;
+  // ver4.6：進階工具區塊已移除，相關 binding 加 null guard
+  var _cab = el('createAllBtn'); if(_cab) _cab.onclick = createAll;
+  var _cob = el('createOneBtn'); if(_cob) _cob.onclick = createOne;
+  var _rsb = el('refreshSheetsBtn'); if(_rsb) _rsb.onclick = refreshSheetsList;
 
   el('lbEditBtn').onclick   = function(){ setLbEditMode(true); };
   el('lbCancelBtn').onclick = function(){ setLbEditMode(false); loadLbSettings(); };
   el('lbSaveBtnBar').onclick = saveLbSettings;
   el('lbKeyword').oninput=function(){renderLbExamples(this.value.trim());};
 
-  function updateCName(){
-    var y=el('cYear').value, m=el('cMonth').value;
-    var rocY=parseInt(y)-1911;
-    var rocM=['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
-    // BUG17 修正：rocNumCh() 已回傳完整「一百一十五」，不再額外加「一百」
-    el('cName').value=rocNumCh(rocY)+'年'+rocM[parseInt(m)]+'月班表';
-  }
+  // rocNumCh 仍對外供 createAll/createOne 使用（透過全域作用域），保留
   function rocNumCh(n){
-    // 支援 100~199（民國 100~199 年）
-    // 修正 BUG 3：補齊「一百」前綴，確保工作表名稱正確（如「一百一十五年」）
     var units=['','一','二','三','四','五','六','七','八','九'];
     var tens =['','一十','二十','三十','四十','五十','六十','七十','八十','九十'];
     if(n<100||n>199) return String(n);
     var rem=n-100, t=Math.floor(rem/10), u=rem%10;
     return '一百'+(t>0?tens[t]:'')+(u>0?units[u]:'');
   }
-  el('cYear').oninput=updateCName;
-  el('cMonth').onchange=updateCName;
-  updateCName();  // 初始化時立即填入預設名稱
+  // ver4.6：cYear/cMonth/cName 元素已移除，updateCName 不再需要
 }
 
 /* ── 班表 ── */
