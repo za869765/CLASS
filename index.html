@@ -2614,29 +2614,37 @@ function rebuildDragChanges(){
       if(b.origName===a.curName && b.curName===a.origName){
         var p2 = k2.split(':');
         var bRow=parseInt(p2[0]), bCi=parseInt(p2[1]);
-        // Preserve existing reason if any
-        var existReason = '';
+        // ver4.7：保留 reason、isPreloaded、isAuditLog 標記，避免 rebuild 時責任歸屬丟失
+        var existReason = '', existPre=false, existAud=false;
         _fpDragChanges.forEach(function(r){
           if((r.srcRow===aRow&&r.srcCi===aCi&&r.dstRow===bRow&&r.dstCi===bCi)||
              (r.dstRow===aRow&&r.dstCi===aCi&&r.srcRow===bRow&&r.srcCi===bCi)){
             existReason = r.reason || '';
+            if(r.isPreloaded) existPre = true;
+            if(r.isAuditLog) existAud = true;
           }
         });
         pairs.push({ srcRow:aRow,srcCi:aCi,dstRow:bRow,dstCi:bCi,
           srcOrig:a.origName,dstOrig:b.origName,srcNew:a.curName,dstNew:b.curName,
-          srcDate:a.date,dstDate:b.date,srcHdr:a.header,dstHdr:b.header,reason:existReason });
+          srcDate:a.date,dstDate:b.date,srcHdr:a.header,dstHdr:b.header,reason:existReason,
+          isPreloaded:existPre, isAuditLog:existAud });
         used[k]=true; used[k2]=true; paired=true;
       }
     });
     if(!paired){
       // Unpaired cell (orphan after undo) - single cell change
-      var existR = '';
+      var existR = '', existPre1=false, existAud1=false;
       _fpDragChanges.forEach(function(r){
-        if((r.srcRow===aRow&&r.srcCi===aCi)||(r.dstRow===aRow&&r.dstCi===aCi)) existR=r.reason||'';
+        if((r.srcRow===aRow&&r.srcCi===aCi)||(r.dstRow===aRow&&r.dstCi===aCi)){
+          existR=r.reason||'';
+          if(r.isPreloaded) existPre1 = true;
+          if(r.isAuditLog) existAud1 = true;
+        }
       });
       pairs.push({ srcRow:aRow,srcCi:aCi,dstRow:aRow,dstCi:aCi,
         srcOrig:a.origName,dstOrig:a.origName,srcNew:a.curName,dstNew:a.curName,
-        srcDate:a.date,dstDate:a.date,srcHdr:a.header,dstHdr:a.header,reason:existR });
+        srcDate:a.date,dstDate:a.date,srcHdr:a.header,dstHdr:a.header,reason:existR,
+        isPreloaded:existPre1, isAuditLog:existAud1 });
       used[k]=true;
     }
   });
