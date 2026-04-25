@@ -4802,7 +4802,9 @@ function autoValidateSchedule(sheetName) {
       rows.forEach((r, i) => {
         const val = r[field];
         if (val && val === prev) {
-          errors.push({ check: 2, msg: `【${label}連續】${r.ds} 與前一日（${rows[i-1].ds}）均為「${val}」` });
+          // ver4.7：附加 field/ds/dsPrev，供後續判斷是否與系統挪移相關
+          errors.push({ check: 2, msg: `【${label}連續】${r.ds} 與前一日（${rows[i-1].ds}）均為「${val}」`,
+            field: field, ds: r.ds, dsPrev: rows[i-1].ds });
         }
         // ★ 修正 BUG 3：空白（全員排除日）時重置 prev，避免跨空格誤判連排
         prev = val || '';
@@ -4820,7 +4822,8 @@ function autoValidateSchedule(sheetName) {
     // ════════════════════════════════════════════════════════════════
     curRows.forEach(r => {
       if (r.duty && r.deng && r.duty === r.deng) {
-        errors.push({ check: 3, msg: `【衝突】${r.ds}（${r.isHol?'假日':'平日'}）值班「${r.duty}」與停班2線「${r.deng}」為同一人（應已挪移）` });
+        errors.push({ check: 3, msg: `【衝突】${r.ds}（${r.isHol?'假日':'平日'}）值班「${r.duty}」與停班2線「${r.deng}」為同一人（應已挪移）`,
+          ds: r.ds });
       }
     });
 
@@ -4892,12 +4895,6 @@ function autoValidateSchedule(sheetName) {
     fairCheckT('停班2線平日', dengWd,     2);
     fairCheckT('停班2線假日', dengHol,    2);
 
-    // ── 整理結果 ─────────────────────────────────────────────────────
-    const check1Errors = errors.filter(e => e.check === 1);
-    const check2Errors = errors.filter(e => e.check === 2);
-    const check3Errors = errors.filter(e => e.check === 3);
-    const check4Errors = errors.filter(e => e.check === 4);
-
     // ver4.7：讀 M 欄 swap note + N1 dengSwapRows，提供前端展示「本月系統挪移」說明
     const dengSwapInfo = [];
     try {
@@ -4933,6 +4930,28 @@ function autoValidateSchedule(sheetName) {
       });
     } catch(e) {}
 
+    // ver4.7：把與「系統挪移」相關的錯誤移到 notices（提示），不算自檢失誤
+    // 規則：
+    //   - check 2 連續同人 + field='deng' + 涉及 swap 的 ds → 視為正常（系統挪移觸發）
+    //   - check 3 值班=停班2線衝突 + 涉及 swap 的 ds → 視為已挪移
+    const swapDsSet = {};
+    dengSwapInfo.forEach(s => { if (s.ds) swapDsSet[s.ds] = true; });
+    const _isSwapRelated = function(e) {
+      if (e.check === 2 && e.field === 'deng') {
+        return !!(swapDsSet[e.ds] || swapDsSet[e.dsPrev]);
+      }
+      if (e.check === 3) return !!swapDsSet[e.ds];
+      return false;
+    };
+    const realErrors = errors.filter(e => !_isSwapRelated(e));
+    const swapNotices = errors.filter(_isSwapRelated).map(e => e.msg);
+
+    // ── 整理結果（依過濾後的 realErrors） ────────────────────────────
+    const check1Errors = realErrors.filter(e => e.check === 1);
+    const check2Errors = realErrors.filter(e => e.check === 2);
+    const check3Errors = realErrors.filter(e => e.check === 3);
+    const check4Errors = realErrors.filter(e => e.check === 4);
+
     return {
       success: true,
       sheetName,
@@ -4942,9 +4961,10 @@ function autoValidateSchedule(sheetName) {
         { id: 3, label: '值班/停班2線衝突', pass: check3Errors.length === 0, errors: check3Errors.map(e => e.msg) },
         { id: 4, label: '門診公平度(±2)',  pass: check4Errors.length === 0, errors: check4Errors.map(e => e.msg) },
       ],
-      allPass: errors.length === 0,
-      totalErrors: errors.length,
-      dengSwapInfo: dengSwapInfo
+      allPass: realErrors.length === 0,
+      totalErrors: realErrors.length,
+      dengSwapInfo: dengSwapInfo,
+      swapNotices: swapNotices
     };
   } catch(e) {
     return { success: false, checks: [], error: e.message };
