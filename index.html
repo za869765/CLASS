@@ -220,6 +220,10 @@ input[type=button]:active,button:active{transform:scale(.97)}
 /* ver4.6 一鍵排班按鈕指引動畫 */
 @keyframes qkPulseRing{0%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 0 rgba(255,255,255,.85)}70%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 22px rgba(255,255,255,0)}100%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 0 rgba(255,255,255,0)}}
 @keyframes qkFingerTap{0%,100%{transform:translate(0,0) rotate(-12deg)}30%{transform:translate(-8px,-12px) rotate(-22deg)}50%{transform:translate(-2px,4px) rotate(-8deg)}70%{transform:translate(-6px,-8px) rotate(-18deg)}}
+/* ver4.7：第二步 — 進入審核班表作業按鈕引導動畫 */
+@keyframes pendingPreviewRing{0%{box-shadow:0 4px 16px rgba(13,71,161,.4),0 0 0 0 rgba(13,71,161,.55)}70%{box-shadow:0 4px 16px rgba(13,71,161,.4),0 0 0 14px rgba(13,71,161,0)}100%{box-shadow:0 4px 16px rgba(13,71,161,.4),0 0 0 0 rgba(13,71,161,0)}}
+.pending-preview-btn-active{animation:pendingPreviewRing 1.6s ease-out infinite}
+.pending-finger-hint{position:absolute;right:-30px;top:50%;transform:translateY(-50%);font-size:2.2rem;pointer-events:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));animation:qkFingerTap 1.4s ease-in-out infinite;z-index:5}
 .qk-square-btn:hover{transform:translateY(-4px) scale(1.04);box-shadow:0 14px 40px rgba(0,0,0,.4)!important}
 .qk-square-btn:active{transform:translateY(0) scale(.98)}
 /* ── Line Bot 設定專用樣式 ── */
@@ -467,6 +471,21 @@ input[type=button]:active,button:active{transform:scale(.97)}
     <div id="fpActionRow" style="display:none;margin-top:14px;gap:10px">
       <button id="fpWriteBtn" style="flex:1;font-size:1rem;font-weight:900;padding:14px;background:linear-gradient(90deg,#2e7d32,#43a047)">✅ 確認寫入</button>
       <button id="fpCancelBtn" style="flex:1;font-size:1rem;padding:14px;background:linear-gradient(90deg,#90a4ae,#607d8b)">取消</button>
+    </div>
+    <!-- ver4.7：拖曳到排班者既有異動格時的確認框（避免覆蓋 preloaded 的責任歸屬） -->
+    <div id="fpOverwriteConfirmOverlay" style="display:none;position:absolute;inset:0;z-index:55;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);align-items:center;justify-content:center;border-radius:16px">
+      <div style="background:#fff;border:3px solid #f59e0b;border-radius:24px;padding:32px 40px;text-align:center;box-shadow:0 20px 60px rgba(245,158,11,.35);max-width:88%;animation:popBounce .4s cubic-bezier(.34,1.56,.64,1) both">
+        <div style="font-size:3rem;margin-bottom:10px">⚠️</div>
+        <div style="font-weight:900;font-size:1.3rem;color:#92400e;margin-bottom:10px;letter-spacing:.5px">此格已是排班者異動</div>
+        <div style="font-size:.95rem;color:#444;line-height:1.8;margin-bottom:20px;padding:0 8px">
+          繼續拖曳會將此格記錄為<br>
+          <b style="color:#1e3a8a;background:#dbeafe;padding:2px 10px;border-radius:6px">審核者新異動</b>（覆蓋排班者原調動）
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <button id="fpOverwriteCancel" style="background:linear-gradient(90deg,#90a4ae,#607d8b);color:#fff;font-size:.95rem;font-weight:700;border-radius:12px;padding:12px 28px;margin:0;width:auto">取消</button>
+          <button id="fpOverwriteOk" style="background:linear-gradient(135deg,#b71c1c,#e53935);color:#fff;font-size:.95rem;font-weight:900;border-radius:12px;padding:12px 28px;margin:0;width:auto;box-shadow:0 4px 14px rgba(229,57,53,.3)">確定覆蓋</button>
+        </div>
+      </div>
     </div>
     <!-- ver4.7 寫入成功彈窗：尺寸放大 2 倍、自動關閉延長 1 倍（8 秒）、文字引導加強 -->
     <div id="fpWriteSuccessOverlay" style="display:none;position:absolute;inset:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);align-items:center;justify-content:center;border-radius:16px">
@@ -2651,6 +2670,32 @@ function rebuildDragChanges(){
   _fpDragChanges = pairs;
 }
 
+// ver4.7：判斷某格是否為排班者既有異動 (preloaded)
+function _isPreloadedCell(rowIdx, ci){
+  if(!_fpDragChanges || !_fpDragChanges.length) return false;
+  return _fpDragChanges.some(function(d){
+    if(!d.isPreloaded) return false;
+    return (d.srcRow===rowIdx && d.srcCi===ci) || (d.dstRow===rowIdx && d.dstCi===ci);
+  });
+}
+
+// ver4.7：顯示「此格已是排班者異動，確定覆蓋？」確認框
+function showFpOverwriteConfirm(cb){
+  var ov = el('fpOverwriteConfirmOverlay');
+  if(!ov){ if(cb) cb(true); return; }
+  ov.style.display = 'flex';
+  var okBtn = el('fpOverwriteOk');
+  var cancelBtn = el('fpOverwriteCancel');
+  function _close(result){
+    ov.style.display = 'none';
+    if(okBtn) okBtn.onclick = null;
+    if(cancelBtn) cancelBtn.onclick = null;
+    if(cb) cb(result);
+  }
+  if(okBtn) okBtn.onclick = function(){ _close(true); };
+  if(cancelBtn) cancelBtn.onclick = function(){ _close(false); };
+}
+
 function makeFpTableDraggable(){
   var tbl = el('fpTable');
   if(!tbl) return;
@@ -2734,29 +2779,40 @@ function makeFpTableDraggable(){
         // No-op if names are same
         if(srcName === dstName){ _fpDragSrc=null; return; }
 
-        // ★ 使用「每格獨立追蹤」取代 swap pair，避免多次拖曳鏈斷裂
         var headers = _fpPreviewData.headers || [];
         var dates   = _fpPreviewData.dates   || [];
 
-        // Apply swap to preview data
-        _fpPreviewData.preview[src.rowIdx][src.ci] = dstName;
-        _fpPreviewData.preview[dstRow][dstCi]      = srcName;
+        function _doSwap(){
+          // Apply swap to preview data
+          _fpPreviewData.preview[src.rowIdx][src.ci] = dstName;
+          _fpPreviewData.preview[dstRow][dstCi]      = srcName;
 
-        // Update each cell record independently (per-cell tracking)
-        updateCellRecord(src.rowIdx, src.ci, srcName, dstName,
-          (dates[src.rowIdx]?dates[src.rowIdx][0]:''), headers[src.ci]||'');
-        updateCellRecord(dstRow, dstCi, dstName, srcName,
-          (dates[dstRow]?dates[dstRow][0]:''), headers[dstCi]||'');
+          // Update each cell record independently (per-cell tracking)
+          updateCellRecord(src.rowIdx, src.ci, srcName, dstName,
+            (dates[src.rowIdx]?dates[src.rowIdx][0]:''), headers[src.ci]||'');
+          updateCellRecord(dstRow, dstCi, dstName, srcName,
+            (dates[dstRow]?dates[dstRow][0]:''), headers[dstCi]||'');
 
-        // Update DOM
-        var srcTd2 = getFpTd(src.rowIdx, src.ci) || src.td;
-        var dstTd2 = getFpTd(dstRow, dstCi)      || td;
-        renderFpCell(srcTd2, dstName, !cellIsOriginal(src.rowIdx, src.ci));
-        renderFpCell(dstTd2, srcName, !cellIsOriginal(dstRow, dstCi));
+          // Update DOM
+          var srcTd2 = getFpTd(src.rowIdx, src.ci) || src.td;
+          var dstTd2 = getFpTd(dstRow, dstCi)      || td;
+          renderFpCell(srcTd2, dstName, !cellIsOriginal(src.rowIdx, src.ci));
+          renderFpCell(dstTd2, srcName, !cellIsOriginal(dstRow, dstCi));
 
-        _fpDragSrc = null;
-        updateFpDragPanel();
-        buildFpStats();
+          _fpDragSrc = null;
+          updateFpDragPanel();
+          buildFpStats();
+        }
+
+        // ver4.7：若 src 或 dst 是排班者既有異動 (preloaded)，彈確認框提醒「二次更動」
+        if(_isPreloadedCell(src.rowIdx, src.ci) || _isPreloadedCell(dstRow, dstCi)){
+          showFpOverwriteConfirm(function(ok){
+            if(ok) _doSwap();
+            else _fpDragSrc = null;
+          });
+          return;
+        }
+        _doSwap();
       };
       td.addEventListener('dragstart', td._onDragStart);
       td.addEventListener('dragend',   td._onDragEnd);
@@ -3624,9 +3680,19 @@ function closeAuditEmpOverlay(confirm){
   if(cb) cb(eid || null);
 }
 
+// ver4.7：第一步動畫停止（查詢按鈕點擊後）
+function _stopRefreshHint(){
+  var btn = el('pendingRefreshBtn');
+  if(btn) btn.style.animation = 'none';
+  var finger = el('pendingRefreshFinger');
+  if(finger) finger.style.display = 'none';
+}
+
 function refreshPendingReview(btn){
   // ver4.6：按鈕為多行 flex 結構，不改 textContent，僅改 disabled + opacity
   if(btn){ btn.disabled=true; btn.style.opacity='0.6'; btn.style.cursor='wait'; }
+  // ver4.7：使用者按下查詢 → 動畫流轉（停查詢按鈕動畫，列表渲染後自動接到第一個 row 按鈕）
+  _stopRefreshHint();
   function _restore(){ if(btn){ btn.disabled=false; btn.style.opacity=''; btn.style.cursor=''; } }
   google.script.run
     .withSuccessHandler(function(r){
@@ -3689,16 +3755,23 @@ function _renderPendingList(r, list){
     ? r.pendingInfo
     : r.sheets.map(function(sn){ return {name:sn,schedTime:'',wcLetter:'',_needFetch:true}; });
 
-  function renderPendingItem(info){
+  function renderPendingItem(info, idx){
     var sn = info.name;
     var snSafe = sn.replace(/'/g,"\'");
     var idSafe = sn.replace(/[^a-zA-Z0-9]/g,'_');
+    // ver4.7：第一筆按鈕加引導 ring 動畫 + 食指 hint（流轉自查詢按鈕）
+    var isFirst = idx === 0;
+    var btnCls  = isFirst ? 'pending-preview-btn-active' : '';
+    var fingerHtml = isFirst ? '<span class="pending-finger-hint">👆</span>' : '';
     return '<div style="background:#fff;border-radius:12px;padding:12px 14px;border:1.5px solid #ffcc80;margin-bottom:4px">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">'
       +'<div><div id="pendingTitle_'+idSafe+'" style="font-weight:900;font-size:.95rem;color:#bf360c;display:flex;align-items:center;flex-wrap:wrap;gap:2px">📋 '+x(sn)+renderInfoTag(info)+'</div>'
       +'<div style="font-size:.75rem;color:#888;margin-top:2px">請先預覽，再點「驗算審核」完成核准</div></div>'
-      +'<button data-action="preview" data-sn="'+idSafe+'" '
+      +'<div style="position:relative;display:inline-block;margin-right:'+(isFirst?'18px':'0')+'">'
+      +'<button data-action="preview" data-sn="'+idSafe+'" class="'+btnCls+'" '
       +'style="background:linear-gradient(135deg,#0d47a1,#1565c0,#0288d1);font-size:1.05rem;font-weight:900;margin:0;padding:18px 32px;width:auto;border-radius:16px;box-shadow:0 4px 16px rgba(13,71,161,.4);letter-spacing:.5px;white-space:nowrap">📝 進入審核班表作業 &nbsp;→</button>'
+      +fingerHtml
+      +'</div>'
       +'</div>'
       +'<div id="autoCheck_'+snSafe+'" style="margin-top:8px"><span style="font-size:.76rem;color:#aaa">⏳ 系統自檢中…</span></div>'
       +'<div id="prevMsg_'+snSafe+'" style="display:none;font-size:.78rem;color:#1565c0;margin-top:6px;padding:4px 8px;background:#e3f2fd;border-radius:6px">🔄 載入中…</div>'
