@@ -217,6 +217,11 @@ input[type=button]:active,button:active{transform:scale(.97)}
 @keyframes popBounce{0%{transform:scale(0)}60%{transform:scale(1.2)}80%{transform:scale(.9)}100%{transform:scale(1)}}
 @keyframes fi{from{opacity:0}to{opacity:1}}
 @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+/* ver4.6 一鍵排班按鈕指引動畫 */
+@keyframes qkPulseRing{0%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 0 rgba(255,255,255,.85)}70%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 22px rgba(255,255,255,0)}100%{box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 0 rgba(255,255,255,0)}}
+@keyframes qkFingerTap{0%,100%{transform:translate(0,0) rotate(-12deg)}30%{transform:translate(-8px,-12px) rotate(-22deg)}50%{transform:translate(-2px,4px) rotate(-8deg)}70%{transform:translate(-6px,-8px) rotate(-18deg)}}
+.qk-square-btn:hover{transform:translateY(-4px) scale(1.04);box-shadow:0 14px 40px rgba(0,0,0,.4)!important}
+.qk-square-btn:active{transform:translateY(0) scale(.98)}
 /* ── Line Bot 設定專用樣式 ── */
 .lbc{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:14px;padding:16px;margin-bottom:14px;border:2px solid var(--line)}
 .lbc h4{color:var(--line);margin:0 0 12px;font-size:.96rem;display:flex;align-items:center;gap:6px}
@@ -668,9 +673,16 @@ input[type=button]:active,button:active{transform:scale(.97)}
           <div style="font-size:2.4rem;margin-bottom:6px">⚡</div>
           <div style="font-weight:900;font-size:1.2rem;letter-spacing:.5px">一鍵排班</div>
           <div style="font-size:.82rem;color:rgba(255,255,255,.85);margin-top:6px;line-height:1.6">建立工作表＋自動排班，一次完成<br>若工作表不存在，自動建立後排班</div>
-          <button id="qkMonthBtn" style="background:rgba(255,255,255,.95);color:#6a1b9a;font-size:1rem;font-weight:900;border-radius:12px;padding:14px 28px;margin:20px 0 0;width:auto;display:inline-flex;align-items:center;gap:10px;letter-spacing:.5px;box-shadow:0 4px 14px rgba(0,0,0,.22)">
-            <span style="font-size:1.3rem">📆</span> 單月排班 — 選擇月份
-          </button>
+          <!-- ver4.6：正方形大按鈕＋食指指引動畫 -->
+          <div style="display:inline-block;position:relative;margin:24px 0 8px">
+            <button id="qkMonthBtn" class="qk-square-btn" style="background:rgba(255,255,255,.96);color:#6a1b9a;font-size:1.05rem;font-weight:900;border-radius:22px;padding:0;margin:0;width:200px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;letter-spacing:.5px;box-shadow:0 8px 28px rgba(0,0,0,.3),0 0 0 0 rgba(255,255,255,.7);cursor:pointer;border:none;transition:transform .25s,box-shadow .25s;animation:qkPulseRing 2s ease-out infinite">
+              <span style="font-size:3.4rem;line-height:1">📆</span>
+              <span style="font-size:1.1rem">單月排班</span>
+              <span style="font-size:.8rem;color:#888;font-weight:600">選擇月份</span>
+            </button>
+            <!-- 食指指引（懸浮在按鈕右下）-->
+            <span class="qk-finger-hint" style="position:absolute;right:-26px;bottom:-20px;font-size:3rem;pointer-events:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));animation:qkFingerTap 1.4s ease-in-out infinite">👆</span>
+          </div>
         </div>
 
       </div>
@@ -679,10 +691,10 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div class="as" id="tab-pending">
 
         <!-- 審核區標題列（刷新按鈕永遠可見）-->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="font-size:.82rem;color:#888">📋 待審核班表區</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+          <div style="font-size:.95rem;color:#666;font-weight:700">📋 待審核班表區</div>
           <button id="pendingRefreshBtn" onclick="refreshPendingReview(this)"
-            style="background:linear-gradient(135deg,#1565c0,#0288d1);color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 6px rgba(21,101,192,.3);width:auto;margin:0">
+            style="background:linear-gradient(135deg,#1565c0,#0288d1,#26c6da);color:#fff;border:none;border-radius:14px;padding:14px 32px;font-size:1.05rem;font-weight:900;cursor:pointer;white-space:nowrap;box-shadow:0 6px 20px rgba(21,101,192,.4);width:auto;margin:0;letter-spacing:.5px">
             🔄 更新待審核班表
           </button>
         </div>
@@ -1501,7 +1513,7 @@ function bind(){
     if(tab==='linebot')loadLbSettings();
     if(tab==='sysconf'){ loadSysconf(); }
     if(tab==='notify'){ loadNotifyList(); }
-    if(tab==='pending'){ loadPendingReview(); }
+    // ver4.6：切到 pending 分頁不自動載入；使用者必須按「更新待審核班表」才會列出
     if(tab==='sysconf'){ loadShiftDays(); patchShiftDaysEditSave(); }
   };
 
@@ -1822,7 +1834,7 @@ function verifyAdmin(){
         el('adminTabs').querySelectorAll('button')[0].classList.add('on');
         el('tab-quick').classList.add('on');
         initAdmin();
-        loadPendingReview();
+        // ver4.6：登入後不自動載入待審核清單；使用者切到「待審核班表」分頁後按「更新」才載入
       }else{
         el('ale').style.display='block';
       }
@@ -3606,7 +3618,7 @@ function _renderPendingList(r, list){
       +'<div><div id="pendingTitle_'+idSafe+'" style="font-weight:900;font-size:.95rem;color:#bf360c;display:flex;align-items:center;flex-wrap:wrap;gap:2px">📋 '+x(sn)+renderInfoTag(info)+'</div>'
       +'<div style="font-size:.75rem;color:#888;margin-top:2px">請先預覽，再點「驗算審核」完成核准</div></div>'
       +'<button data-action="preview" data-sn="'+idSafe+'" '
-      +'style="background:linear-gradient(135deg,#0d47a1,#1565c0,#0288d1);font-size:1.1rem;font-weight:900;margin:0;padding:18px 44px;width:auto;border-radius:16px;box-shadow:0 4px 16px rgba(13,71,161,.4);letter-spacing:.5px;white-space:nowrap">👁 預覽班表 &nbsp;→</button>'
+      +'style="background:linear-gradient(135deg,#0d47a1,#1565c0,#0288d1);font-size:1.05rem;font-weight:900;margin:0;padding:18px 32px;width:auto;border-radius:16px;box-shadow:0 4px 16px rgba(13,71,161,.4);letter-spacing:.5px;white-space:nowrap">📝 進入審核班表作業 &nbsp;→</button>'
       +'</div>'
       +'<div id="autoCheck_'+snSafe+'" style="margin-top:8px"><span style="font-size:.76rem;color:#aaa">⏳ 系統自檢中…</span></div>'
       +'<div id="prevMsg_'+snSafe+'" style="display:none;font-size:.78rem;color:#1565c0;margin-top:6px;padding:4px 8px;background:#e3f2fd;border-radius:6px">🔄 載入中…</div>'
