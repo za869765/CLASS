@@ -431,7 +431,6 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div style="display:flex;gap:8px">
         <button id="fpZoomOut" style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">－</button>
         <button id="fpZoomIn"  style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">＋</button>
-        <button id="fpPrint"   style="background:linear-gradient(90deg,#546e7a,#78909c);font-size:.82rem;margin:0;padding:0 16px;height:36px;width:auto">🖨️ 列印</button>
       </div>
     </div>
     <!-- 狀態訊息 -->
@@ -2403,22 +2402,7 @@ function bindFullPreview(){
   el('fpCancelBtn').onclick = closeFpModal;
   el('fpZoomIn').onclick  = function(){ _fpFontSize = Math.min(1.6, _fpFontSize + 0.1); applyFpFontSize(); };
   el('fpZoomOut').onclick = function(){ _fpFontSize = Math.max(0.6, _fpFontSize - 0.1); applyFpFontSize(); };
-  el('fpPrint').onclick   = function(){
-    var win = window.open('','_blank','width=1100,height=800');
-    var letterSuffix = _fpWriteLetter ? '  <b style="color:#1565c0">' + _fpWriteLetter + '</b>' : '';
-    win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+el('fpTitle').textContent+'</title>'
-      +'<style>body{font-family:"Noto Sans TC",Arial,sans-serif;padding:6px}h2{color:#1565c0;margin-bottom:4px;font-size:13pt}'
-      +'table{width:100%;border-collapse:collapse}th{background:#1565c0;color:#fff;padding:4px 3px;font-size:7pt}'
-      +'td{padding:3px 2px;border:1px solid #ccc;text-align:center;font-size:7pt}'
-      +'tr.fp-wknd td{background:#fff3e0}.fp-date{text-align:left;font-weight:700;background:#f5f5f5}'
-      +'p{font-size:8pt;margin:2px 0 4px}'
-      +'@page{size:A4 portrait;margin:6mm}</style>'
-      +'</head><body><h2>臺南市佳里區衛生所　'+el('fpTitle').textContent+'</h2>'
-      +'<p style="font-size:9pt;color:#888">'+el('fpSubtitle').textContent+letterSuffix+'</p>'
-      +el('fpTableWrap').innerHTML+'</body></html>');
-    win.document.close();
-    setTimeout(function(){ win.print(); }, 500);
-  };
+  // ver4.6：右上角「列印」按鈕已移除，列印改由寫入後變身的 fpWriteBtn（核章列印）執行
   el('fpWriteBtn').onclick = function(){
     if(!_fpWriteCallback) return;
     var eid = _fpArrangerEmpId || (el('qkEmpId') ? el('qkEmpId').value.trim() : '');
