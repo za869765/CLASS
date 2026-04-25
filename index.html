@@ -784,12 +784,8 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div id="auditAutoCheckResult" style="margin-bottom:12px;min-height:32px">
         <span style="font-size:.78rem;color:#aaa">⏳ 系統自檢中…</span>
       </div>
-      <!-- 驗算說明 -->
-      <div style="background:#e3f2fd;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.82rem;color:#1565c0;line-height:1.7">
-        請勾選您已核對的項目（可多選），至少勾選一項，再選擇結果。
-      </div>
-      <!-- 驗算項目清單 -->
-      <div id="auditChecklist" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px"></div>
+      <!-- ver4.7：移除 5 項勾選 checklist；自檢結果（含挪移衍生提示）已上方顯示 -->
+      <div id="auditChecklist" style="display:none"></div>
       <!-- 審核者員工編號（隱藏，從預覽入口帶入）-->
       <input type="hidden" id="auditEmpId">
       <!-- 二次確認彈窗（核准 / 退回）-->
@@ -820,7 +816,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div id="auditMsg" style="display:none;font-size:.85rem;font-weight:700;padding:8px 14px;border-radius:8px;margin-bottom:10px"></div>
       <!-- 按鈕 -->
       <div style="display:flex;gap:10px">
-        <button id="auditPassBtn" style="flex:1;font-size:.95rem;font-weight:900;margin:0;padding:13px;background:linear-gradient(135deg,#1b5e20,#2e7d32,#43a047);border-radius:12px">✅ 檢視無誤</button>
+        <button id="auditPassBtn" style="flex:1;font-size:.95rem;font-weight:900;margin:0;padding:13px;background:linear-gradient(135deg,#1b5e20,#2e7d32,#43a047);border-radius:12px">✅ 確定審核完畢</button>
         <button id="auditRejectBtn" style="flex:1;font-size:.95rem;font-weight:900;margin:0;padding:13px;background:linear-gradient(135deg,#b71c1c,#c62828,#e53935);border-radius:12px">❌ 排班錯誤</button>
       </div>
     </div>
@@ -3844,28 +3840,42 @@ function renderAutoCheck(container, res){
     return;
   }
   var allPass = res.allPass;
+  var totalNotices = res.totalNotices || 0;
   var html = '<div style="border-top:1px solid #f5f5f5;padding-top:8px;margin-top:4px">';
-  // Summary badge
-  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:'+(allPass?'0':'6px')+'">';
-  html += allPass
-    ? '<span style="display:inline-flex;align-items:center;gap:5px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:700;color:#2e7d32">'
-      +'<span style="font-size:1rem">✅</span> 系統自檢通過</span>'
-    : '<span style="display:inline-flex;align-items:center;gap:5px;background:#fff3e0;border:1.5px solid #ffb74d;border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:700;color:#e65100">'
-      +'<span style="font-size:.85rem">⚠️</span> 自檢發現 '+res.totalErrors+' 項問題，請在驗算中確認</span>';
-  // Individual checks
+  // ver4.7：三級摘要 — 綠 ✓ 通過 / 黃 ⚠️ 挪移衍生提示（仍算通過）/ 紅 ✕ 演算法錯
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:'+(allPass && !totalNotices?'0':'6px')+'">';
+  if(!allPass){
+    html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#ffebee;border:1.5px solid #ef9a9a;border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:700;color:#c62828">'
+      +'<span style="font-size:.85rem">✕</span> 自檢發現 '+res.totalErrors+' 項排班程式問題，請在驗算中確認</span>';
+  } else if(totalNotices){
+    html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#fffde7;border:1.5px solid #ffd54f;border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:700;color:#f57c00">'
+      +'<span style="font-size:.85rem">⚠️</span> 自檢通過（含 '+totalNotices+' 項挪移衍生提示）</span>';
+  } else {
+    html += '<span style="display:inline-flex;align-items:center;gap:5px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:20px;padding:4px 12px;font-size:.8rem;font-weight:700;color:#2e7d32">'
+      +'<span style="font-size:1rem">✅</span> 系統自檢通過</span>';
+  }
+  // Individual checks（三色 chip）
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-left:4px">';
   res.checks.forEach(function(ck){
-    var tipText = ck.errors.length ? ck.errors.join(' | ') : ck.label+'：正常';
-    html += '<span title="'+tipText+'" style="display:inline-flex;align-items:center;gap:3px;font-size:.73rem;padding:2px 8px;border-radius:12px;cursor:default;'
-      +(ck.pass ? 'background:#e8f5e9;color:#388e3c;border:1px solid #c8e6c9' : 'background:#fff3e0;color:#e65100;border:1px solid #ffcc80')+'">' 
-      +(ck.pass ? '✓' : '✕')+' '+ck.label+'</span>';
+    var hasErr  = ck.errors && ck.errors.length;
+    var hasNote = ck.notices && ck.notices.length;
+    var tipText;
+    if(hasErr) tipText = '【排班錯誤】'+ck.errors.join(' | ');
+    else if(hasNote) tipText = '【挪移衍生提示】'+ck.notices.join(' | ');
+    else tipText = ck.label+'：正常';
+    var icon, bg, fg, br;
+    if(hasErr){ icon='✕'; bg='#ffebee'; fg='#c62828'; br='#ef9a9a'; }
+    else if(hasNote){ icon='⚠'; bg='#fffde7'; fg='#f57c00'; br='#ffd54f'; }
+    else { icon='✓'; bg='#e8f5e9'; fg='#388e3c'; br='#c8e6c9'; }
+    html += '<span title="'+tipText+'" style="display:inline-flex;align-items:center;gap:3px;font-size:.73rem;padding:2px 8px;border-radius:12px;cursor:default;background:'+bg+';color:'+fg+';border:1px solid '+br+'">'
+      +icon+' '+ck.label+'</span>';
   });
   html += '</div></div>';
-  // Error details (collapsible)
+  // Error details — 真實演算法錯誤（紅）
   if(!allPass){
-    var allErrors = res.checks.reduce(function(a,ck){ return a.concat(ck.errors); },[]);
-    html += '<div style="font-size:.74rem;color:#c62828;margin-top:4px;line-height:1.7;background:#fff8f8;border-radius:6px;padding:4px 8px">';
-    allErrors.forEach(function(e){ html += '<div>• '+e+'</div>'; });
+    var allErrors = res.checks.reduce(function(a,ck){ return a.concat(ck.errors||[]); },[]);
+    html += '<div style="font-size:.74rem;color:#c62828;margin-top:4px;line-height:1.7;background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:5px 9px"><b>✕ 排班程式問題：</b><br>';
+    allErrors.forEach(function(e){ html += '• '+e+'<br>'; });
     html += '</div>';
   }
   // ver4.7：本月系統挪移（停班2線）說明區塊 — 自檢不視為失誤，只當提示
@@ -5719,12 +5729,8 @@ function bindAuditModal(){
 function showAuditConfirm(action){
   var empId = el('auditEmpId').value.trim() || _fpArrangerEmpId || '';
   if(!empId){ amsgEl('auditMsg','⚠️ 請先輸入員工編號','#e65100'); return; }
-  var checked = [];
-  AUDIT_ITEMS.forEach(function(item){
-    var cb = document.getElementById(item.id);
-    if(cb && cb.checked) checked.push(cb.value);
-  });
-  if(!checked.length){ amsgEl('auditMsg','⚠️ 請至少勾選一項驗算項目','#e65100'); return; }
+  // ver4.7：5 項勾選清單已移除，改傳全部 AUDIT_ITEMS 為已核對（僅供日誌記錄）
+  var checked = AUDIT_ITEMS.map(function(item){ return item.id; });
 
   var box = el('auditConfirmBox');
   el('auditConfirmMsg').style.display = 'none';

@@ -4944,25 +4944,30 @@ function autoValidateSchedule(sheetName) {
       return false;
     };
     const realErrors = errors.filter(e => !_isSwapRelated(e));
-    const swapNotices = errors.filter(_isSwapRelated).map(e => e.msg);
+    const swapErrs = errors.filter(_isSwapRelated);
+    const swapNotices = swapErrs.map(e => e.msg);
 
-    // ── 整理結果（依過濾後的 realErrors） ────────────────────────────
-    const check1Errors = realErrors.filter(e => e.check === 1);
-    const check2Errors = realErrors.filter(e => e.check === 2);
-    const check3Errors = realErrors.filter(e => e.check === 3);
-    const check4Errors = realErrors.filter(e => e.check === 4);
+    // ver4.7：把每個 check 的 errors 分為 real (紅 ✕) 與 notices (黃 ⚠️)
+    function _bucket(checkN) {
+      return {
+        real: realErrors.filter(e => e.check === checkN).map(e => e.msg),
+        notices: swapErrs.filter(e => e.check === checkN).map(e => e.msg)
+      };
+    }
+    const c1 = _bucket(1), c2 = _bucket(2), c3 = _bucket(3), c4 = _bucket(4);
 
     return {
       success: true,
       sheetName,
       checks: [
-        { id: 1, label: '跨月輪序接續',   pass: check1Errors.length === 0, errors: check1Errors.map(e => e.msg) },
-        { id: 2, label: '連續同人班次',   pass: check2Errors.length === 0, errors: check2Errors.map(e => e.msg) },
-        { id: 3, label: '值班/停班2線衝突', pass: check3Errors.length === 0, errors: check3Errors.map(e => e.msg) },
-        { id: 4, label: '門診公平度(±2)',  pass: check4Errors.length === 0, errors: check4Errors.map(e => e.msg) },
+        { id: 1, label: '跨月輪序接續',   pass: c1.real.length === 0, errors: c1.real, notices: c1.notices },
+        { id: 2, label: '連續同人班次',   pass: c2.real.length === 0, errors: c2.real, notices: c2.notices },
+        { id: 3, label: '值班/停班2線衝突', pass: c3.real.length === 0, errors: c3.real, notices: c3.notices },
+        { id: 4, label: '門診公平度(±2)',  pass: c4.real.length === 0, errors: c4.real, notices: c4.notices },
       ],
       allPass: realErrors.length === 0,
       totalErrors: realErrors.length,
+      totalNotices: swapErrs.length,
       dengSwapInfo: dengSwapInfo,
       swapNotices: swapNotices
     };
