@@ -3853,6 +3853,16 @@ function renderAutoCheck(container, res){
     allErrors.forEach(function(e){ html += '<div>• '+e+'</div>'; });
     html += '</div>';
   }
+  // ver4.7：本月系統挪移（停班2線）說明區塊 — 讓使用者了解連續同人是否為挪移所致
+  if(res.dengSwapInfo && res.dengSwapInfo.length){
+    html += '<div style="font-size:.74rem;color:#bf360c;margin-top:6px;line-height:1.7;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:6px 10px">'
+      +'<b>⚙️ 本月系統挪移（停班2線）共 '+res.dengSwapInfo.length+' 筆：</b><br>';
+    res.dengSwapInfo.forEach(function(s){
+      html += '• '+x(s.ds||'')+' 停班2線「'+x(s.name||'')+'」<span style="color:#888">（原本應排於 '+x(s.origDate||'')+'）</span><br>';
+    });
+    html += '<span style="color:#888;font-size:.7rem">系統為避免「停班2線=當日值班同一人」自動將兩日對換；若連續同人涉及上列挪移列屬正常。</span>'
+      +'</div>';
+  }
   html += '</div>';
   container.innerHTML = html;
 }

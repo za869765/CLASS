@@ -4898,6 +4898,41 @@ function autoValidateSchedule(sheetName) {
     const check3Errors = errors.filter(e => e.check === 3);
     const check4Errors = errors.filter(e => e.check === 4);
 
+    // ver4.7：讀 M 欄 swap note + N1 dengSwapRows，提供前端展示「本月系統挪移」說明
+    const dengSwapInfo = [];
+    try {
+      const swapMap = {};
+      // 從 M 欄 cell note
+      const mNotes2 = curSheet.getRange('M2:M32').getNotes();
+      mNotes2.forEach((row, i) => {
+        const note = row[0] ? row[0].toString().trim() : '';
+        if (note.indexOf('swap:') === 0) swapMap[i] = note.replace('swap:', '');
+      });
+      // 從 N1 dengSwapRows（fallback）
+      const n1Note = curSheet.getRange('N1').getNote() || '';
+      n1Note.split('\n').forEach(line => {
+        if (line.indexOf('dengSwapRows:') === 0) {
+          line.replace('dengSwapRows:', '').split(',').forEach(pair => {
+            const kv = pair.split('=');
+            if (kv.length === 2) {
+              const k = parseInt(kv[0]);
+              if (!isNaN(k) && !swapMap[k]) swapMap[k] = kv[1].trim();
+            }
+          });
+        }
+      });
+      Object.keys(swapMap).forEach(idxStr => {
+        const idx = parseInt(idxStr);
+        const r = curRows[idx];
+        dengSwapInfo.push({
+          rowIdx: idx,
+          ds: r ? r.ds : '',
+          name: r ? r.deng : '',
+          origDate: swapMap[idxStr]
+        });
+      });
+    } catch(e) {}
+
     return {
       success: true,
       sheetName,
@@ -4908,7 +4943,8 @@ function autoValidateSchedule(sheetName) {
         { id: 4, label: '門診公平度(±2)',  pass: check4Errors.length === 0, errors: check4Errors.map(e => e.msg) },
       ],
       allPass: errors.length === 0,
-      totalErrors: errors.length
+      totalErrors: errors.length,
+      dengSwapInfo: dengSwapInfo
     };
   } catch(e) {
     return { success: false, checks: [], error: e.message };
