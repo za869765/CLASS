@@ -162,7 +162,8 @@ input[type=button]:active,button:active{transform:scale(.97)}
 #fpTable tr.fp-wknd td{background:#fff3e0}
 #fpTable tr.fp-wknd td.fp-date{color:#c62828}
 #fpTable tr:nth-child(even):not(.fp-wknd) td:not(.fp-date){background:#f8f9ff}
-#fpTable td.fp-swap{background:#fff3e0}
+/* ver4.7：系統挪移格用深橙 + outline，與假日 row 的淡橙背景區分 */
+#fpTable td.fp-swap{background:#ffcc80!important;color:#bf360c!important;font-weight:900!important;outline:2px solid #f57c00;outline-offset:-2px;box-shadow:inset 0 0 0 1px #fff}
 #fpTable td.fp-empty{color:#ccc;font-weight:400}
 .pn{color:var(--admin);font-weight:700}
 .apg{display:flex;gap:8px;align-items:center;margin-bottom:14px}
@@ -459,7 +460,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <div id="fpColorLegend" style="display:flex;gap:10px;margin-bottom:8px;font-size:.7rem;color:#555;flex-wrap:wrap">
         <span><span style="display:inline-block;width:12px;height:12px;background:#fef9c3;border:1px solid #d97706;border-radius:2px;margin-right:3px;vertical-align:middle"></span>排班者異動</span>
         <span id="fpAuditLegend" style="display:none"><span style="display:inline-block;width:12px;height:12px;background:#dbeafe;border:1px solid #3b82f6;border-radius:2px;margin-right:3px;vertical-align:middle"></span>審核者異動</span>
-        <span title="停班2線與當日值班同一人時，系統會自動將兩日對換以避免衝突；hover 該格可見原本日期。"><span style="display:inline-block;width:12px;height:12px;background:#fff3e0;border:1px solid #f57c00;border-radius:2px;margin-right:3px;vertical-align:middle"></span>⚙️ 系統挪移（停班2線）</span>
+        <span title="停班2線與當日值班同一人時，系統會自動將兩日對換以避免衝突；hover 該格可見原本日期。"><span style="display:inline-block;width:12px;height:12px;background:#ffcc80;border:1.5px solid #f57c00;border-radius:2px;margin-right:3px;vertical-align:middle"></span>⚙️ 系統挪移（停班2線）</span>
       </div>
       <div id="fpDragList" style="display:flex;flex-direction:column;gap:5px;max-height:140px;overflow-y:auto"></div>
     </div>
