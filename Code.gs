@@ -4735,7 +4735,8 @@ function autoValidateSchedule(sheetName) {
     const dengOrder = settingSheet.getRange('B1:B11').getValues().flat().map(String).filter(n => n.trim());
     const kkOrder   = settingSheet.getRange('J1:J3').getValues().flat().map(String).filter(n => n.trim());
 
-    const checkContinuity = function(label, order, prevLastName, curFirstName) {
+    // ver4.7：附加 field 屬性供後續判斷是否為人工挪移衍生
+    const checkContinuity = function(label, order, prevLastName, curFirstName, field) {
       if (!order.length || !prevLastName || !curFirstName) return;
       const prevIdx = order.indexOf(prevLastName);
       const curIdx  = order.indexOf(curFirstName);
@@ -4744,7 +4745,8 @@ function autoValidateSchedule(sheetName) {
       if (curIdx !== expected) {
         errors.push({
           check: 1,
-          msg: `【${label}】上月末位「${prevLastName}」→本月應接「${order[expected]}」，但實際為「${curFirstName}」（跳位或重回順位1）`
+          msg: `【${label}】上月末位「${prevLastName}」→本月應接「${order[expected]}」，但實際為「${curFirstName}」（跳位或重回順位${expected+1}）`,
+          field: field || ''
         });
       }
     }
@@ -4785,11 +4787,11 @@ function autoValidateSchedule(sheetName) {
       const curFirstHolDeng = (curRows.find(r => r.isHol && r.deng) || {}).deng || '';
       const curFirstWdKk   = (curRows.find(r => !r.isHol && r.kk) || {}).kk || '';
 
-      checkContinuity('平日值班', dutyOrder, prevLastWdDuty, curFirstWdDuty);
-      checkContinuity('假日值班', dutyOrder, prevLastHolDuty, curFirstHolDuty);
-      checkContinuity('平日停班2線', dengOrder, prevLastWdDeng, curFirstWdDeng);
-      checkContinuity('假日停班2線', dengOrder, prevLastHolDeng, curFirstHolDeng);
-      if (kkOrder.length) checkContinuity('平日協助掛號', kkOrder, prevLastWdKk, curFirstWdKk);
+      checkContinuity('平日值班', dutyOrder, prevLastWdDuty, curFirstWdDuty, 'duty');
+      checkContinuity('假日值班', dutyOrder, prevLastHolDuty, curFirstHolDuty, 'duty');
+      checkContinuity('平日停班2線', dengOrder, prevLastWdDeng, curFirstWdDeng, 'deng');
+      checkContinuity('假日停班2線', dengOrder, prevLastHolDeng, curFirstHolDeng, 'deng');
+      if (kkOrder.length) checkContinuity('平日協助掛號', kkOrder, prevLastWdKk, curFirstWdKk, 'kk');
     } else {
       errors.push({ check: 1, msg: `無法讀取上月「${prevSN}」，跳過接續檢查` });
     }
@@ -4930,12 +4932,26 @@ function autoValidateSchedule(sheetName) {
       });
     } catch(e) {}
 
-    // ver4.7：把與「系統挪移」相關的錯誤移到 notices（提示），不算自檢失誤
-    // 規則：
-    //   - check 2 連續同人 + field='deng' + 涉及 swap 的 ds → 視為正常（系統挪移觸發）
-    //   - check 3 值班=停班2線衝突 + 涉及 swap 的 ds → 視為已挪移
+    // ver4.7：把「挪移衍生」的錯誤移到 notices（黃 ⚠️ 提示），不算自檢失誤
+    // 兩類挪移：
+    //   (a) 系統挪移（停班2線 swap）：涉及的 ds 在 dengSwapInfo
+    //   (b) 人工挪移（排班者/審核者拖曳）：涉及的 ds|職務 在 changes log
     const swapDsSet = {};
     dengSwapInfo.forEach(s => { if (s.ds) swapDsSet[s.ds] = true; });
+    // 讀人工挪移 changes（getScheduleChanges 回傳 { "M/d|職務": [entries] }）
+    const manualChanges = {};
+    try {
+      const ch = getScheduleChanges(sheetName);
+      if (ch && typeof ch === 'object') {
+        Object.keys(ch).forEach(k => { manualChanges[k] = true; });
+      }
+    } catch(e) {}
+    const _fieldToHdr = function(f) {
+      if (f === 'duty') return '值班';
+      if (f === 'deng') return '停班2線';
+      if (f === 'kk') return '支援';
+      return '';
+    };
     const _isSwapRelated = function(e) {
       if (e.check === 2 && e.field === 'deng') {
         return !!(swapDsSet[e.ds] || swapDsSet[e.dsPrev]);
@@ -4943,15 +4959,38 @@ function autoValidateSchedule(sheetName) {
       if (e.check === 3) return !!swapDsSet[e.ds];
       return false;
     };
-    const realErrors = errors.filter(e => !_isSwapRelated(e));
-    const swapErrs = errors.filter(_isSwapRelated);
-    const swapNotices = swapErrs.map(e => e.msg);
+    const _isManualRelated = function(e) {
+      // check 1 跨月接續：本月任何一個拖曳異動都可能改變起始輪序
+      if (e.check === 1) {
+        const hdr = _fieldToHdr(e.field);
+        if (!hdr) return false;
+        // 任何 'M/d|<hdr>' 在 changes 中即視為人工挪移衍生
+        return Object.keys(manualChanges).some(k => k.endsWith('|' + hdr));
+      }
+      // check 2 連續同人：ds 或 dsPrev 對應該欄位有人工挪移
+      if (e.check === 2) {
+        const hdr = _fieldToHdr(e.field);
+        if (!hdr) return false;
+        return !!(manualChanges[(e.ds||'')+'|'+hdr] || manualChanges[(e.dsPrev||'')+'|'+hdr]);
+      }
+      // check 3 衝突：ds 對應的值班 or 停班2線 任一被人工挪移
+      if (e.check === 3) {
+        return !!(manualChanges[(e.ds||'')+'|值班'] || manualChanges[(e.ds||'')+'|停班2線']);
+      }
+      return false;
+    };
+    const _isNoticeOnly = function(e) {
+      return _isSwapRelated(e) || _isManualRelated(e);
+    };
+    const realErrors = errors.filter(e => !_isNoticeOnly(e));
+    const noticeErrs = errors.filter(_isNoticeOnly);
+    const swapNotices = noticeErrs.map(e => e.msg);
 
     // ver4.7：把每個 check 的 errors 分為 real (紅 ✕) 與 notices (黃 ⚠️)
     function _bucket(checkN) {
       return {
         real: realErrors.filter(e => e.check === checkN).map(e => e.msg),
-        notices: swapErrs.filter(e => e.check === checkN).map(e => e.msg)
+        notices: noticeErrs.filter(e => e.check === checkN).map(e => e.msg)
       };
     }
     const c1 = _bucket(1), c2 = _bucket(2), c3 = _bucket(3), c4 = _bucket(4);
@@ -4967,7 +5006,7 @@ function autoValidateSchedule(sheetName) {
       ],
       allPass: realErrors.length === 0,
       totalErrors: realErrors.length,
-      totalNotices: swapErrs.length,
+      totalNotices: noticeErrs.length,
       dengSwapInfo: dengSwapInfo,
       swapNotices: swapNotices
     };
