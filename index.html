@@ -455,7 +455,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
     <div id="fpDragPanel" style="display:none;margin-top:14px;background:#fff8e1;border:1.5px solid #ffd54f;border-radius:10px;padding:10px 14px">
       <div style="font-size:.82rem;font-weight:700;color:#e65100;margin-bottom:6px">
         ✏️ 排班已異動（<span id="fpDragCount">0</span> 筆）
-        <button onclick="clearFpDragAll()" style="background:none;border:none;color:#c62828;font-size:.75rem;cursor:pointer;margin-left:8px;padding:0;width:auto;box-shadow:none">全部清除</button>
+        <!-- ver4.7：「全部清除」按鈕已移除（會錯亂 preloaded/audit 標記） -->
       </div>
       <div id="fpColorLegend" style="display:flex;gap:10px;margin-bottom:8px;font-size:.7rem;color:#555;flex-wrap:wrap">
         <span><span style="display:inline-block;width:12px;height:12px;background:#fef9c3;border:1px solid #d97706;border-radius:2px;margin-right:3px;vertical-align:middle"></span>排班者異動</span>
@@ -2617,10 +2617,25 @@ function rebuildDragChanges(){
     var entry = _fpCellMap[k];
     if(entry.curName !== entry.origName) changed.push(k);
   });
-  // Pair up changed cells (they come in swap pairs naturally)
-  // Rebuild pairs: for each changed cell find its pair by matching origName/curName
   var used = {};
   var pairs = [];
+
+  // ver4.7 階段 1：優先保留原 single-cell preloaded（排班者既有異動）
+  // preloaded 載入時為 single 結構 (srcRow===dstRow, srcCi===dstCi)，
+  // 不能被 audit 觸發的 rebuild 跨 cell 合併成 pair（會誤標為「審核者」）
+  _fpDragChanges.forEach(function(r){
+    if(!r.isPreloaded) return;
+    if(r.srcRow !== r.dstRow || r.srcCi !== r.dstCi) return; // 只保留 single
+    var sk = cellKey(r.srcRow, r.srcCi);
+    if(used[sk]) return;
+    var c = _fpCellMap[sk];
+    if(!c) return;
+    if(c.curName !== r.srcNew) return; // audit 已改動該格 → 由階段 2 重建
+    pairs.push(Object.assign({}, r)); // 直接保留含 isPreloaded 標記
+    used[sk] = true;
+  });
+
+  // 階段 2：剩下的 cells 走原 pair 配對演算法（含 audit 新拖曳異動）
   changed.forEach(function(k){
     if(used[k]) return;
     var a = _fpCellMap[k];
