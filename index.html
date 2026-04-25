@@ -690,13 +690,18 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <!-- 待審核班表 -->
       <div class="as" id="tab-pending">
 
-        <!-- 審核區標題列（刷新按鈕永遠可見）-->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px;flex-wrap:wrap">
-          <div style="font-size:.95rem;color:#666;font-weight:700">📋 待審核班表區</div>
-          <button id="pendingRefreshBtn" onclick="refreshPendingReview(this)"
-            style="background:linear-gradient(135deg,#1565c0,#0288d1,#26c6da);color:#fff;border:none;border-radius:14px;padding:14px 32px;font-size:1.05rem;font-weight:900;cursor:pointer;white-space:nowrap;box-shadow:0 6px 20px rgba(21,101,192,.4);width:auto;margin:0;letter-spacing:.5px">
-            🔄 更新待審核班表
-          </button>
+        <!-- ver4.6：待審核查詢按鈕 — 置中正方形＋食指指引動畫 -->
+        <div style="text-align:center;margin:8px 0 24px">
+          <div style="font-size:.95rem;color:#666;font-weight:700;margin-bottom:14px">📋 待審核班表區</div>
+          <div style="display:inline-block;position:relative">
+            <button id="pendingRefreshBtn" class="qk-square-btn" onclick="refreshPendingReview(this)"
+              style="background:linear-gradient(135deg,#0d47a1,#1565c0,#0288d1);color:#fff;font-size:1.05rem;font-weight:900;border-radius:22px;padding:0;margin:0;width:200px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;letter-spacing:.5px;box-shadow:0 8px 28px rgba(13,71,161,.45),0 0 0 0 rgba(255,255,255,.7);cursor:pointer;border:none;transition:transform .25s,box-shadow .25s;animation:qkPulseRing 2s ease-out infinite">
+              <span style="font-size:3.4rem;line-height:1">🔍</span>
+              <span style="font-size:1.15rem">查詢</span>
+              <span style="font-size:.85rem;color:rgba(255,255,255,.85);font-weight:700">待審核班表</span>
+            </button>
+            <span class="qk-finger-hint" style="position:absolute;right:-26px;bottom:-20px;font-size:3rem;pointer-events:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));animation:qkFingerTap 1.4s ease-in-out infinite">👆</span>
+          </div>
         </div>
         <!-- 待審核班表（自動載入）-->
         <div id="pendingReviewBox" style="display:none;position:relative;border-radius:16px;padding:18px 16px;margin-bottom:16px;overflow:hidden;background:linear-gradient(135deg,#fff8e1,#fff3e0,#fbe9e7);border:2.5px solid #ff8f00;box-shadow:0 0 0 0 rgba(255,143,0,.5);animation:pendingPulse 2.2s ease-in-out infinite">
@@ -3547,10 +3552,12 @@ function closeAuditEmpOverlay(confirm){
 }
 
 function refreshPendingReview(btn){
-  if(btn){ btn.disabled=true; btn.textContent='🔄 讀取中…'; }
+  // ver4.6：按鈕為多行 flex 結構，不改 textContent，僅改 disabled + opacity
+  if(btn){ btn.disabled=true; btn.style.opacity='0.6'; btn.style.cursor='wait'; }
+  function _restore(){ if(btn){ btn.disabled=false; btn.style.opacity=''; btn.style.cursor=''; } }
   google.script.run
     .withSuccessHandler(function(r){
-      if(btn){ btn.disabled=false; btn.textContent='🔄 更新'; }
+      _restore();
       var box  = el('pendingReviewBox');
       var list = el('pendingList');
       if(!box||!list) return;
@@ -3561,7 +3568,7 @@ function refreshPendingReview(btn){
       _renderPendingList(r, list);
     })
     .withFailureHandler(function(e){
-      if(btn){ btn.disabled=false; btn.textContent='🔄 更新'; }
+      _restore();
       showAlert('更新失敗：'+e.message, true);
     })
     .getPendingSheets();
