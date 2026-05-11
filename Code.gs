@@ -2195,11 +2195,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       if (!d || !shouldAssignShift(d, 9, year, month)) continue;
       // 找到卡介苗日
       bcgDateKey = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
-      const qPool = staff.filter(s =>
-        qCandNames.includes(s.name) &&
-        !isPersonExcluded(s.name, d, exclusions, year)
-      );
-      if (qPool.length === 0) break;
+
+      if (qCandNames.length === 0) break;
 
       // 不覆蓋模式且已有資料 → 用現有資料
       if (!options.overwrite) {
@@ -2207,14 +2204,20 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         if (ex9) { bcgPersonThisMonth = ex9; break; }
       }
 
-      qPool.sort((a, b) => {
-        const diff = (assignCount[9][a.name]||0) - (assignCount[9][b.name]||0);
-        if (diff !== 0) return diff;
-        const aIdx = qCandNames.indexOf(a.name);
-        const bIdx = qCandNames.indexOf(b.name);
-        return month % 2 === 1 ? bIdx - aIdx : aIdx - bIdx;
-      });
-      bcgPersonThisMonth = qPool[0].name;
+      // v4.8.0 嚴格 ABCABC 循環：絕對年月 mod 候選人數
+      //   例 3 人：2026-01=Q1、2026-02=Q2、2026-03=Q3、2026-04=Q1…跨年連續
+      //   公式 (year*12 + month - 1) % N — 絕對年月計數確保跨 12→隔年1 月不跳號
+      //   該 idx 當天 excluded（請假/離職）→ 順序往下找 valid candidate
+      const _absMonth = year * 12 + (month - 1);
+      const _baseIdx  = ((_absMonth % qCandNames.length) + qCandNames.length) % qCandNames.length;
+      for (let _off = 0; _off < qCandNames.length; _off++) {
+        const _tryIdx  = (_baseIdx + _off) % qCandNames.length;
+        const _tryName = qCandNames[_tryIdx];
+        if (!staff.find(s => s.name === _tryName)) continue;          // 不在 staff 清單
+        if (isPersonExcluded(_tryName, d, exclusions, year)) continue; // 當天請假
+        bcgPersonThisMonth = _tryName;
+        break;
+      }
       break;
     }
 
