@@ -26,7 +26,7 @@ const GLOBAL_CONFIG = {
     'I': 'K1:K8',   // 預登2
     'J': 'K1:K8',   // 預注1
     'K': 'K1:K8',   // 預注2
-    'L': 'Q1:Q2',   // 卡介苗
+    'L': 'Q1:Q11',   // 卡介苗
     'M': 'B1:B11'   // 登革熱二線：B欄順序（登革熱專屬輪序）
   },
   SELECT_TYPE: {
@@ -1514,7 +1514,7 @@ function getSystemSettings() {
     const pointsRaw  = sheet.getRange('P1:P11').getValues().flat();
     const kkNames    = sheet.getRange('J1:J3').getValues().flat();
     const clinicNames= sheet.getRange('K1:K8').getValues().flat();
-    const bcgNames   = sheet.getRange('Q1:Q2').getValues().flat();
+    const bcgNames   = sheet.getRange('Q1:Q11').getValues().flat();
     // 值班順序（E欄）、登革熱順序（B欄）
     const dutyNames   = sheet.getRange('E1:E11').getValues().flat();
     const dengueNames = sheet.getRange('B1:B11').getValues().flat();
@@ -1568,7 +1568,7 @@ function saveSystemSettings(adminPassword, settings) {
     }
     if (settings.kkNames)     for (let i=0;i<3;i++)  sheet.getRange('J'+(i+1)).setValue(settings.kkNames[i]||'');
     if (settings.clinicNames)  for (let i=0;i<8;i++)  sheet.getRange('K'+(i+1)).setValue(settings.clinicNames[i]||'');
-    if (settings.bcgNames)    for (let i=0;i<2;i++)  sheet.getRange('Q'+(i+1)).setValue(settings.bcgNames[i]||'');
+    if (settings.bcgNames)    for (let i=0;i<11;i++) sheet.getRange('Q'+(i+1)).setValue(settings.bcgNames[i]||'');
     if (settings.dutyNames)   for (let i=0;i<11;i++) sheet.getRange('E'+(i+1)).setValue(settings.dutyNames[i]||'');
     if (settings.dengueNames) for (let i=0;i<11;i++) sheet.getRange('B'+(i+1)).setValue(settings.dengueNames[i]||'');
     if (settings.newAdminPwd && settings.newAdminPwd.trim()) sheet.getRange('N2').setValue(settings.newAdminPwd.trim());
@@ -1622,7 +1622,7 @@ function setSuccessor(adminPassword, rowIndex, newStaff) {
 
     // ── 各候選名單自動將舊名→新名 ────────────────────────────────
     if (oldName && newStaff.name && oldName !== newStaff.name) {
-      ['K1:K8','J1:J3','E1:E11','Q1:Q2','B1:B11'].forEach(function(r) {
+      ['K1:K8','J1:J3','E1:E11','Q1:Q11','B1:B11'].forEach(function(r) {
         replaceInRange_(sheet, r, oldName, newStaff.name);
       });
     }
