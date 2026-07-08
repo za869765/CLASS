@@ -4273,7 +4273,7 @@ function askGemini(question) {
     };
 
     for (var i = 0; i < models.length; i++) {
-      var url  = 'https://generativelanguage.googleapis.com/v1beta/models/'
+      var url  = 'https://gemini-relay.za869765.workers.dev/v1beta/models/'
                + models[i] + ':generateContent?key=' + apiKey;
       var resp = UrlFetchApp.fetch(url, {
         method: 'post',
