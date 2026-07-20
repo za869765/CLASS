@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="version" content="ver4.7">
+<meta name="version" content="ver4.8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -259,6 +259,40 @@ input[type=button]:active,button:active{transform:scale(.97)}
 .excl-row label{font-size:.72rem;color:#888;white-space:nowrap}
 /* 個人統計 */
 .ps-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:.78rem;font-weight:700;border:1px solid}
+/* ── ver4.8 互動回饋補強 ─────────────────────────────────── */
+/* disabled 全域視覺（原本只有 .lx-btn 有樣式，其餘按鈕禁用時外觀不變） */
+input[type=button]:disabled,button:disabled{opacity:.55;cursor:wait;filter:grayscale(.4);transform:none!important;box-shadow:none!important}
+/* 全域處理中 overlay（原 #lt 藏在登入面板內，Modal 流程呼叫 showLoad 完全不可見） */
+#gLoad{display:none;position:fixed;inset:0;z-index:9000;background:rgba(20,30,50,.35);backdrop-filter:blur(2px);justify-content:center;align-items:center}
+#gLoad.show{display:flex;animation:fi .15s}
+#gLoad .gl-card{background:#fff;border-radius:14px;padding:22px 34px;box-shadow:0 16px 48px rgba(0,0,0,.3);text-align:center;animation:up .18s}
+#gLoad .gl-txt{margin-top:10px;font-size:.9rem;font-weight:700;color:var(--primary)}
+/* 點擊按壓感：月份清單與班表格子 */
+#sl li:active{transform:scale(.97)}
+#st td a{display:inline-block;transition:transform .1s}
+#st td a:active{transform:scale(.9)}
+/* textarea focus（原 focus 樣式只涵蓋 input） */
+textarea:focus{border-color:var(--accent)!important;background:#fff!important}
+/* 顯示/隱藏員編眼睛 hover */
+#tep svg{transition:stroke var(--t)}
+#tep:hover svg{stroke:var(--accent)}
+/* 管理員密碼錯誤搖晃（display none→block 時動畫自動重播） */
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+#ale{animation:shake .3s}
+/* 預覽 Modal 進場動畫（原 display:block 直開無動畫，與其他 .modal 不一致） */
+#fullPreviewModal{animation:fi .18s}
+/* 補人/替換選單項 hover */
+.fp-add-nurse-item{transition:background var(--t)}
+.fp-add-nurse-item:hover{background:#e3f2fd}
+/* 異動清單移除鈕 hover */
+.fp-rm{transition:all var(--t)}
+.fp-rm:hover{color:#b71c1c!important;transform:scale(1.25)!important}
+/* 過去班表收納子選單 */
+#sl li.sl-toggle{background:linear-gradient(90deg,#f5f5f5,#eceff1);color:#607d8b;font-size:.92rem;display:flex;justify-content:space-between;align-items:center;border:1px dashed #cfd8dc}
+#sl li.sl-toggle .sl-arrow{transition:transform var(--t);display:inline-block;font-size:.85rem}
+#sl li.sl-toggle.open .sl-arrow{transform:rotate(90deg)}
+#sl li.sl-past{background:linear-gradient(90deg,#fafafa,#f5f5f5);color:#90a4ae;font-weight:600;animation:fi .2s}
+#sl li.sl-past:hover{background:linear-gradient(90deg,#eceff1,#fafafa);color:#607d8b}
 </style>
 </head>
 <body>
@@ -392,6 +426,7 @@ input[type=button]:active,button:active{transform:scale(.97)}
       <h3 style="margin:0">請選擇一個班表：</h3>
       <button id="backToLoginBtn" style="background:linear-gradient(90deg,#90a4ae,#607d8b);width:auto;padding:8px 16px;font-size:.85rem;margin:0">← 返回</button>
     </div>
+    <div style="font-size:.72rem;color:#999;margin:-6px 0 8px">💡 點選月份即可開啟班表；下方按鈕可查看職務統計與點數看板</div>
     <ul id="sl"></ul>
     <input type="button" value="📈 我的職務統計" id="myStatsBtn" style="background:linear-gradient(90deg,#0288d1,#0097a7);margin-top:14px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
@@ -439,12 +474,16 @@ input[type=button]:active,button:active{transform:scale(.97)}
         <div id="fpSubtitle" style="font-size:.82rem;color:#888;margin-top:2px"></div>
       </div>
       <div style="display:flex;gap:8px">
-        <button id="fpZoomOut" style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">－</button>
-        <button id="fpZoomIn"  style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">＋</button>
+        <button id="fpZoomOut" title="縮小表格字級" style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">－</button>
+        <button id="fpZoomIn"  title="放大表格字級" style="background:#e8eaf6;color:#3949ab;width:36px;height:36px;border-radius:50%;font-size:1.1rem;margin:0;padding:0;flex-shrink:0">＋</button>
       </div>
     </div>
     <!-- 狀態訊息 -->
     <div id="fpMsg" style="display:none;font-size:.88rem;font-weight:700;margin-bottom:10px;padding:8px 14px;border-radius:8px;background:#e8f5e9;color:#2e7d32"></div>
+    <!-- ver4.8：拖曳操作說明（常駐，取代只在異動後才出現的面板說明） -->
+    <div id="fpDragHint" style="font-size:.72rem;color:#8a6d3b;background:#fffde7;border:1px solid #ffe082;border-radius:8px;padding:5px 12px;margin-bottom:8px">
+      💡 操作說明：直接<b>拖曳人名</b>到其他格子即可對調；點<b>空白格</b>可補人、點有人的格子可替換。橙色格＝系統自動挪移，滑鼠移上可見原日期。（拖曳需以電腦滑鼠操作）
+    </div>
     <!-- 表格容器 -->
     <div id="fpTableWrap" style="overflow:auto">
       <table id="fpTable" style="border-collapse:collapse;width:100%"></table>
@@ -506,6 +545,9 @@ input[type=button]:active,button:active{transform:scale(.97)}
 </div>
 
 <!-- 門診新增人員浮動選擇器 -->
+<!-- ver4.8：全域處理中 overlay（showLoad/hideLoad 使用；原 #lt 藏於登入面板，Modal 流程不可見） -->
+<div id="gLoad"><div class="gl-card"><div class="sp"></div><div class="gl-txt" id="gLoadTxt">處理中…</div></div></div>
+
 <div id="fpAddPicker" style="display:none;position:fixed;z-index:2000;background:#fff;border:1.5px solid #90caf9;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22);padding:10px 0;min-width:185px;max-height:300px;overflow-y:auto">
   <div id="fpAddPickerTitle" style="padding:4px 14px 6px;font-size:.75rem;font-weight:700;color:#1565c0;border-bottom:1px solid #e3f2fd;margin-bottom:4px;line-height:1.5">選擇護理師</div>
   <div id="fpAddPickerList" style="display:flex;flex-direction:column"></div>
@@ -634,11 +676,12 @@ input[type=button]:active,button:active{transform:scale(.97)}
   <div class="mc">
     <button class="mx" id="cancelShiftCloseBtn">✕</button>
     <h3 id="shiftTitle">更換班別</h3>
+    <div style="font-size:.72rem;color:#999;margin:-10px 0 10px">操作步驟：① 點選代理人 → ② 輸入您的員工編號 → ③ 確認更換</div>
     <div id="soc"></div>
     <div class="eg">
       <input type="password" maxlength="10" class="ei" id="eii" placeholder="員工編號"
         style="display:none;opacity:0;transform:scale(.95);transition:opacity .3s,transform .3s;width:14ch;text-align:center;margin:0 auto">
-      <span id="tep" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;z-index:2;background:none;box-shadow:none;padding:0;margin:0;width:auto">
+      <span id="tep" title="顯示 / 隱藏員工編號" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;z-index:2;background:none;box-shadow:none;padding:0;margin:0;width:auto">
         <svg id="eo" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><ellipse cx="12" cy="12" rx="8" ry="5"></ellipse><circle cx="12" cy="12" r="2.5"></circle></svg>
         <svg id="ec" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="8" ry="5"></ellipse><circle cx="12" cy="12" r="2.5"></circle><line x1="4" y1="20" x2="20" y2="4" stroke="#888" stroke-width="2"></line></svg>
       </span>
@@ -1382,6 +1425,9 @@ function handleAdmin(){
 /* ── state ── */
 var selSheet='', curCell=null, curDate='', curCol=0;
 var selOpts=[], selType='SC', hdrs=[], empVis=false, lastEmp='', adminPwd='', staffList=[];
+var _preSheets=null;   // ★ 開頁時預抓的班表清單 {list,ts}（loadSheets 直接使用，免等待；TTL 10 分鐘）
+var _schedCache={};    // ★ viewSched 取得的班表資料留存 {data,ts}（供一鍵列印重用；TTL 2 分鐘）
+function _invalidateCaches(){ _schedCache={}; _preSheets=null; }  // 任何寫入班表/建立工作表成功後呼叫
 
 /* ── helpers ── */
 function x(v){
@@ -1400,7 +1446,13 @@ function showAlert(msg,err){
 function showM(id){el(id).classList.add('show');}
 function hideM(id){el(id).classList.remove('show');}
 function hideAll(){document.querySelectorAll('.modal').forEach(function(m){m.classList.remove('show');});}
-function showLoad(){
+function showLoad(txt){
+  // ★ ver4.8：改用全域 #gLoad overlay（原 #lt 藏在登入面板內，Modal 流程呼叫時完全不可見）
+  var g=el('gLoad');
+  if(g){
+    var t=el('gLoadTxt'); if(t) t.textContent=txt||'處理中…';
+    g.classList.add('show');
+  }
   var lt=el('lt');
   if(lt){lt.style.display='block';}
   // 如果是在 lx-panel，把 lx-actions 半透明
@@ -1408,6 +1460,7 @@ function showLoad(){
   if(actions) actions.style.opacity='.4';
 }
 function hideLoad(){
+  var g=el('gLoad'); if(g) g.classList.remove('show');
   var lt=el('lt');
   if(lt){lt.style.display='none';}
   var actions=document.querySelector('.lx-actions');
@@ -1419,8 +1472,17 @@ function amsg(id,msg,color){var e=el(id);e.style.display='block';e.style.color=c
 window.onload=function(){
   try{ bind(); }catch(e){ console.error('bind error:',e); }
   try{ loadHdrs(); }catch(e){}
-  try{ loadRecs(); }catch(e){}
+  // ★ 效能：開頁即預抓班表清單（原本等按「進入班表」才抓，使用者要等 1.5~2.5 秒）
+  //   原本此處的 loadRecs() 已移除：當時 selSheet 尚未選定，抓完 viewSched 也會隱藏面板，純浪費
+  try{ preloadSheets(); }catch(e){}
 };
+
+function preloadSheets(){
+  google.script.run
+    .withSuccessHandler(function(s){ _preSheets = (s && s.length) ? {list:s, ts:Date.now()} : null; })
+    .withFailureHandler(function(){ _preSheets = null; })  // 失敗不影響：loadSheets 會照舊即時抓
+    .getAvailableSheets();
+}
 
 function bind(){
   // loginBtn / adminBtn 已在 HTML onclick 屬性綁定，這裡加備用
@@ -1436,6 +1498,12 @@ function bind(){
   el('printBtn').onclick=function(){
     // ★ 直接呼叫 getScheduleData 取得完整資料（含 holidayRows）再開新視窗列印
     // 與核章列印共用同一套 renderForPrint，格式完全一致
+    // ★ 效能：viewSched 剛抓過的資料直接重用（畫面上正是這份資料），免再等 2~3 秒。
+    //   TTL 2 分鐘：超過就重抓，避免印到其他人期間的異動
+    var cached=_schedCache[selSheet];
+    if(cached && cached.data && cached.data.schedule && (Date.now()-cached.ts)<120000){
+      renderForPrint(selSheet, cached.data); return;
+    }
     var btn = el('printBtn');
     btn.value = '⏳ 準備列印…'; btn.disabled = true;
     google.script.run
@@ -1569,31 +1637,86 @@ function bind(){
 }
 
 /* ── 班表 ── */
+// ★ ver4.8：民國漢字 → 數字（一百一十五 → 115），與後端 rocStrToNum 同邏輯
+function _rocStrToNum(str){
+  var d={'零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+  var n=0, s=str||'';
+  if(s.indexOf('百')>-1){
+    var p=s.split('百');
+    n+=(d[p[0]]!==undefined?d[p[0]]:1)*100;
+    s=p[1]||'';
+  }
+  if(s.indexOf('十')>-1){
+    var t=s.split('十');
+    n+=(t[0]===''?1:(d[t[0]]||0))*10;
+    n+=d[t[1]]||0;
+  }else{
+    n+=d[s]||0;
+  }
+  return n;
+}
+// ★ 判斷班表名稱是否為過去（已鎖定）月份，與後端 isSheetLocked 同邏輯
+function _sheetIsPast(name){
+  var m=(name||'').match(/^(.+?)年(.+?)月班表$/);
+  if(!m) return false;
+  var y=_rocStrToNum(m[1]), mo=_rocStrToNum(m[2]);
+  if(!y||!mo) return false;
+  y+=1911;
+  var now=new Date();
+  return y<now.getFullYear()||(y===now.getFullYear()&&mo<now.getMonth()+1);
+}
+
+function _renderSheetList(sheets){
+  // ★ 恢復兩顆按鈕（不管成功失敗都要還原）
+  var lb = el('loginBtn');
+  if(lb){
+    lb.disabled=false; lb.style.opacity='';
+    lb.innerHTML='📋 進入班表<small>Schedule Access · 全體同仁使用</small>';
+  }
+  var ab = el('adminBtn');
+  if(ab){ ab.disabled=false; ab.style.opacity=''; }
+  var list=el('sl');
+  if(!sheets||!sheets.length){list.innerHTML='<li>沒有可用的班表</li>';
+    // 隱藏登入頁後顯示 modal
+    var lc=el('loginContainer'); if(lc) lc.classList.add('lx-hide');
+    showM('sheetSelectModal');return;}
+  // ★ ver4.8：過去（已鎖定）月份收納至「📁 過去班表」子選單，點擊展開，介面更清爽
+  var cur=[], past=[];
+  sheets.forEach(function(s){ (_sheetIsPast(s)?past:cur).push(s); });
+  var html=cur.map(function(s){return'<li data-s="'+x(s)+'">'+x(s)+'</li>';}).join('');
+  if(past.length){
+    html+='<li class="sl-toggle" data-toggle="past" title="點擊展開/收合過去月份">📁 過去班表（'+past.length+' 個月）<span class="sl-arrow">▸</span></li>';
+    html+=past.map(function(s){return'<li class="sl-past" data-s="'+x(s)+'" style="display:none">🔒 '+x(s)+'</li>';}).join('');
+  }
+  list.innerHTML=html;
+  // 沒有任何當期班表時（例如跨年初尚未建新表）自動展開過去清單
+  if(!cur.length && past.length){
+    var tg=list.querySelector('.sl-toggle');
+    if(tg) tg.classList.add('open');
+    list.querySelectorAll('.sl-past').forEach(function(li2){ li2.style.display=''; });
+  }
+  list.onclick=function(e){
+    var li=e.target.closest('li');
+    if(!li) return;
+    if(li.dataset.toggle==='past'){
+      var open=li.classList.toggle('open');
+      list.querySelectorAll('.sl-past').forEach(function(li2){ li2.style.display=open?'':'none'; });
+      return;
+    }
+    if(li.dataset.s){selSheet=li.dataset.s;viewSched();}
+  };
+  // ★ 載入成功才隱藏登入頁，確保 GAS 回應正常才切換畫面
+  var lc2=el('loginContainer'); if(lc2) lc2.classList.add('lx-hide');
+  showM('sheetSelectModal');
+}
+
 function loadSheets(){
+  // ★ 效能：開頁已預抓到清單就直接渲染（幾乎即時）；預抓失敗或超過 10 分鐘（可能已建新表）才即時抓
+  if(_preSheets && _preSheets.list && _preSheets.list.length && (Date.now()-_preSheets.ts)<600000){
+    _renderSheetList(_preSheets.list); return;
+  }
   google.script.run
-    .withSuccessHandler(function(sheets){
-      // ★ 恢復兩顆按鈕（不管成功失敗都要還原）
-      var lb = el('loginBtn');
-      if(lb){
-        lb.disabled=false; lb.style.opacity='';
-        lb.innerHTML='📋 進入班表<small>Schedule Access · 全體同仁使用</small>';
-      }
-      var ab = el('adminBtn');
-      if(ab){ ab.disabled=false; ab.style.opacity=''; }
-      var list=el('sl');
-      if(!sheets||!sheets.length){list.innerHTML='<li>沒有可用的班表</li>';
-        // 隱藏登入頁後顯示 modal
-        var lc=el('loginContainer'); if(lc) lc.classList.add('lx-hide');
-        showM('sheetSelectModal');return;}
-      list.innerHTML=sheets.map(function(s){return'<li data-s="'+x(s)+'">'+x(s)+'</li>';}).join('');
-      list.onclick=function(e){
-        var li=e.target.closest('li');
-        if(li&&li.dataset.s){selSheet=li.dataset.s;viewSched();}
-      };
-      // ★ 載入成功才隱藏登入頁，確保 GAS 回應正常才切換畫面
-      var lc2=el('loginContainer'); if(lc2) lc2.classList.add('lx-hide');
-      showM('sheetSelectModal');
-    })
+    .withSuccessHandler(_renderSheetList)
     .withFailureHandler(function(e){
       var lb = el('loginBtn');
       if(lb){
@@ -1612,8 +1735,13 @@ function loadSheets(){
 
 function viewSched(){
   hideM('sheetSelectModal');
+  showLoad('載入班表中…');  // ★ ver4.8：原本此處 1~3 秒全畫面無任何回饋（缺口第一名）
+  var requestedSheet=selSheet;  // ★ 防 race：使用者快速切換月份時，晚到的舊回應不可存錯 key / 渲染錯表
   google.script.run
     .withSuccessHandler(function(data){
+      _schedCache[requestedSheet]={data:data, ts:Date.now()};  // ★ 效能：留存供一鍵列印重用，免重抓
+      if(requestedSheet!==selSheet) return;  // 已切到別的班表，丟棄晚到回應（不動 overlay，新請求還在跑）
+      hideLoad();
       var tbl=el('st');
       var locked=data.locked===true;
       var changes=data.changes||{};
@@ -1727,12 +1855,19 @@ function viewSched(){
       showM('scheduleModal');
       el('rc').style.display='none';
     })
-    .withFailureHandler(function(e){showAlert('載入班表失敗：'+e.message,true);})
-    .getScheduleData(selSheet);
+    .withFailureHandler(function(e){
+      if(requestedSheet!==selSheet) return;  // ★ 晚到的舊請求失敗不干擾已切換的新畫面
+      hideLoad();
+      showAlert('載入班表失敗：'+e.message,true);
+      showM('sheetSelectModal');  // 失敗時回到月份選單，不留全空畫面
+    })
+    .getScheduleData(requestedSheet);
 }
 
 function loadHdrs(){
-  try{ google.script.run.withSuccessHandler(function(h){hdrs=h||[];}).getShiftHeaders(); }catch(e){}
+  // ★ 效能：改為前端常數，省一次後端 round-trip。
+  //   此陣列必須與 Code.gs GLOBAL_CONFIG.SHIFT_HEADERS 一致（兩者同專案部署，同步修改）
+  hdrs=["值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介苗","停班2線"];
 }
 
 function loadRecs(emp){
@@ -1748,7 +1883,7 @@ function loadRecs(emp){
 
 function openShiftM(date,col,cell){
   curDate=date;curCol=col;curCell=cell;selOpts=[];
-  showLoad();
+  showLoad('載入代理人選項…');
   if(!hdrs.length){showAlert('班別名稱尚未載入，請稍後再試。',true);hideLoad();return;}
   var sn=hdrs[col-3]||'';
   google.script.run
@@ -1800,32 +1935,44 @@ function confirmShift(){
   var inp=el('eii');
   var eid=inp.value.trim();lastEmp=eid;
   if(!eid){showAlert('請輸入員工編號',true);return;}
-  showLoad();
+  // ★ ver4.8：送出期間鎖定按鈕防連點（兩段後端呼叫等待較長，原本可重複點擊連發請求）
+  var _csBtn=el('confirmShiftBtn');
+  if(_csBtn) _csBtn.disabled=true;
+  function _csDone(){ if(_csBtn) _csBtn.disabled=false; }
+  showLoad('驗證員工編號中…');
   google.script.run
     .withSuccessHandler(function(ok){
-      if(!ok){hideLoad();showAlert('員工編號驗證失敗',true);return;}
+      if(!ok){hideLoad();_csDone();showAlert('員工編號驗證失敗',true);return;}
       var se=el('en').checked;
       var rmk=(el('shiftRemark')?el('shiftRemark').value.trim():'');
+      showLoad('更新班表中…');
       // BUG18 修正：包 try-catch，避免同步例外導致 loading 卡住無提示
       try {
         google.script.run
           .withSuccessHandler(function(msg){
-            hideLoad();showAlert(msg,false);
+            hideLoad();_csDone();
+            // ★ 穩定性修正：後端失敗時回傳的是錯誤字串（已鎖定/找不到日期/系統忙碌/系統錯誤…），
+            //   原本一律當成功處理 → 畫面顯示已換班但試算表沒變。改為只認「換班成功」開頭才算成功；
+            //   失敗以紅色顯示並保留視窗，讓使用者重試或取消。
+            var ok=(typeof msg==='string' && msg.indexOf('換班成功')===0);
+            if(!ok){ showAlert(msg||'更新失敗，請稍後再試。',true); return; }
+            showAlert(msg,false);
             if(curCell)curCell.textContent=ns;
+            delete _schedCache[selSheet];  // 班表已變動，列印快取失效（下次列印重抓）
             var rem2=el('shiftRemark');if(rem2)rem2.value='';
             hideM('shiftSelectModal');
             loadRecs(lastEmp);
             setTimeout(function(){hideM('scheduleModal');showM('sheetSelectModal');},1000);
           })
-          .withFailureHandler(function(e){hideLoad();showAlert('更新失敗：'+e.message,true);})
+          .withFailureHandler(function(e){hideLoad();_csDone();showAlert('更新失敗：'+e.message,true);})
           // BUG22 修正：傳入 adminPwd（管理員登入後有值），讓管理員可幫他人換班
           .updateShift(selSheet,curDate,curCol,selOpts,se,eid,rmk,adminPwd||'');
       } catch(err) {
-        hideLoad();
+        hideLoad();_csDone();
         showAlert('更新失敗：'+(err && err.message ? err.message : err),true);
       }
     })
-    .withFailureHandler(function(e){hideLoad();showAlert('驗證失敗：'+e.message,true);})
+    .withFailureHandler(function(e){hideLoad();_csDone();showAlert('驗證失敗：'+e.message,true);})
     .verifyEmpId(eid);
 }
 
@@ -1848,10 +1995,12 @@ function openAdmin(){
 function verifyAdmin(){
   var pw=el('apw').value.trim();
   if(!pw)return;
-  showLoad();
+  var _avb=el('avb'); if(_avb) _avb.disabled=true;  // ★ ver4.8：驗證期間鎖定按鈕
+  showLoad('驗證管理員密碼中…');
   google.script.run
     .withSuccessHandler(function(ok){
       hideLoad();
+      if(_avb) _avb.disabled=false;
       if(ok){
         adminPwd=pw;
         el('als').style.display='none';
@@ -1862,10 +2011,12 @@ function verifyAdmin(){
         initAdmin();
         // ver4.6：登入後不自動載入待審核清單；使用者切到「待審核班表」分頁後按「更新」才載入
       }else{
-        el('ale').style.display='block';
+        var ale=el('ale');
+        ale.style.display='none'; void ale.offsetWidth;  // ★ 強制重排，讓 shake 動畫每次都重播
+        ale.style.display='block';
       }
     })
-    .withFailureHandler(function(e){hideLoad();showAlert('驗證錯誤：'+e.message,true);})
+    .withFailureHandler(function(e){hideLoad();if(_avb)_avb.disabled=false;showAlert('驗證錯誤：'+e.message,true);})
     .verifyAdminPassword(pw);
 }
 
@@ -2941,7 +3092,7 @@ function updateFpDragPanel(){
       +'<input type="text" placeholder="理由（選填）" maxlength="50" value="'+x(r.reason||'')+'" '
       +'oninput="_fpDragChanges['+i+'].reason=this.value" '
       +'style="width:100px;padding:3px 8px;border:1px solid #ddd;border-radius:5px;font-size:.74rem;background:'+newInputBg+';min-width:0;outline:none;flex-shrink:0">'
-      +'<button onclick="removeFpDrag('+i+')" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:.85rem;padding:0;width:auto;box-shadow:none;flex-shrink:0">✕</button>'
+      +'<button class="fp-rm" title="移除此筆異動（還原格子）" onclick="removeFpDrag('+i+')" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:.85rem;padding:0;width:auto;box-shadow:none;flex-shrink:0">✕</button>'
       +'</div>';
   }).join('');
   // ver4.7：append 系統挪移（停班2線）橙色塊，每列一筆
@@ -3483,6 +3634,7 @@ function mPreview(){
       showFullPreview(r, sheet, '預覽結果 — 確認後按「確認寫入」', function(done){
         google.script.run
           .withSuccessHandler(function(r2){
+            if(r2.success) _invalidateCaches();  // ★ 班表已改寫，前端快取失效
             done(r2.success ? '✅ '+r2.message : '❌ '+r2.message, r2.success);
             if(r2.success) amsg('mMsg','✅ '+r2.message,'var(--success)');
           })
@@ -3503,6 +3655,7 @@ function mExec(){
   google.script.run
     .withSuccessHandler(function(r){
       if(!r.success){amsg('mMsg','❌ '+r.message,'var(--danger)');return;}
+      _invalidateCaches();  // ★ 班表已改寫，前端快取失效
       amsg('mMsg','✅ '+r.message,'var(--success)');
       renderPrev(r);
     })
@@ -3629,6 +3782,7 @@ function createAll(){
           return'<div style="padding:5px 10px;border-radius:6px;background:'+(ok?'#e8f5e9':'#fff8e1')+';font-size:.8rem;color:'+(ok?'#2e7d32':'#f57c00')+'">'+(ok?'✅':'⏭')+' '+x(res.message)+'</div>';
         }).join('');
       }
+      _invalidateCaches();  // ★ 已建立新工作表，班表清單快取失效
       refreshSheetsList();
       initAdmin();
     })
@@ -3645,7 +3799,7 @@ function createOne(){
   google.script.run
     .withSuccessHandler(function(r){
       amsg('createOneMsg',r.message,r.success?'var(--success)':'var(--danger)');
-      if(r.success){refreshSheetsList();initAdmin();}
+      if(r.success){_invalidateCaches();refreshSheetsList();initAdmin();}  // ★ 新工作表已建立，清單快取失效
     })
     .withFailureHandler(function(e){amsg('createOneMsg','失敗：'+e.message,'var(--danger)');})
     .createScheduleSheet(adminPwd,year,month,name);
@@ -3990,6 +4144,7 @@ function previewPendingSheet(sheetName){
         google.script.run
           .withSuccessHandler(function(res){
             var ok = res && res.success;
+            if(ok) _invalidateCaches();  // ★ 審核寫入已改寫班表，前端快取失效
             if(ok && _fpDragChanges && _fpDragChanges.length > 0){
               // ★ 只記錄審核者新增的異動，排除 preloaded（排班者已記錄的）
               var newAuditChanges = _fpDragChanges.filter(function(d){ return !d.isPreloaded; });
@@ -4212,11 +4367,13 @@ function loadStats(){
   var sheet=sel.value;
   if(!sheet){showAlert('請選擇班表',true);return;}
   amsg('statsMsg','載入中...','#1565c0');
+  var _slBtn=el('statsLoadBtn'); if(_slBtn) _slBtn.disabled=true;  // ★ ver4.8：載入期間鎖定防連點
   el('statsWrap').style.display='none';
   el('otWrap').style.display='none';
   el('otEmpty').style.display='none';
   google.script.run
     .withSuccessHandler(function(r){
+      if(_slBtn) _slBtn.disabled=false;
       if(!r.success){amsg('statsMsg','❌ '+r.message,'var(--danger)');return;}
       amsg('statsMsg',
         '統計範圍：'+(sheet==='__ALL__'?'全部班表（共'+r.sheets.length+'個月）':sheet),
@@ -4226,7 +4383,7 @@ function loadStats(){
       loadOvertime(sheet);
       loadHolidayAttendance(sheet);
     })
-    .withFailureHandler(function(e){amsg('statsMsg','失敗：'+e.message,'var(--danger)');})
+    .withFailureHandler(function(e){if(_slBtn)_slBtn.disabled=false;amsg('statsMsg','失敗：'+e.message,'var(--danger)');})
     .getScheduleStats(sheet);
 }
 
@@ -4557,8 +4714,10 @@ function saveLbSettings(){
   var keyword = el('lbKeyword').value.trim();
   var fuzzy   = el('lbFuzzy').checked;
   amsg('lbMsg','儲存中...','var(--line)');
+  showLoad('儲存 Line Bot 設定中…');  // ★ ver4.8：儲存期間全域鎖定防重複送出
   google.script.run
     .withSuccessHandler(function(r){
+      hideLoad();
       amsg('lbMsg', r.success ? '✅ '+r.message : '❌ '+r.message,
            r.success ? 'var(--success)' : 'var(--danger)');
       if(r.success){
@@ -4567,7 +4726,7 @@ function saveLbSettings(){
         loadLbSettings();
       }
     })
-    .withFailureHandler(function(e){ amsg('lbMsg','失敗：'+e.message,'var(--danger)'); })
+    .withFailureHandler(function(e){ hideLoad(); amsg('lbMsg','失敗：'+e.message,'var(--danger)'); })
     .updateLineBotSettings(adminPwd, token, keyword, fuzzy);
 }
 
@@ -4978,12 +5137,14 @@ function renderNotifyList(){
 }
 function saveNotifyList(){
   amsg('notifyMsg','儲存中…','#546e7a');
+  showLoad('儲存通知設定中…');  // ★ ver4.8：儲存期間全域鎖定防重複送出
   google.script.run
     .withSuccessHandler(function(r){
+      hideLoad();
       amsg('notifyMsg',(r.success?'✅ ':'❌ ')+r.message,r.success?'var(--success)':'var(--danger)');
       if(r.success) setNotifyEditMode(false);
     })
-    .withFailureHandler(function(e){ amsg('notifyMsg','失敗：'+e.message,'var(--danger)'); })
+    .withFailureHandler(function(e){ hideLoad(); amsg('notifyMsg','失敗：'+e.message,'var(--danger)'); })
     .saveNotifySettings(adminPwd, notifyData.map(function(s){ return {_row:s._row, notify:s.notify}; }));
 }
 
@@ -5148,8 +5309,10 @@ function saveSysconf(){
     newAdminPwd: newPwd
   };
   amsg('sysconfMsg','儲存中…','#546e7a');
+  showLoad('儲存系統設定中…');  // ★ ver4.8：儲存最多逐格寫入百餘次、可達數秒，全域鎖定防重複送出
   google.script.run
     .withSuccessHandler(function(r){
+      hideLoad();
       amsg('sysconfMsg', r.success?'✅ '+r.message:'❌ '+r.message,
            r.success?'var(--success)':'var(--danger)');
       if(r.success){
@@ -5157,7 +5320,7 @@ function saveSysconf(){
         loadSysconf(); // 重新載入確認
       }
     })
-    .withFailureHandler(function(e){ amsg('sysconfMsg','失敗：'+e.message,'var(--danger)'); })
+    .withFailureHandler(function(e){ hideLoad(); amsg('sysconfMsg','失敗：'+e.message,'var(--danger)'); })
     .saveSystemSettings(adminPwd, settings);
 }
 
@@ -5537,6 +5700,7 @@ function _qkPreviewWriteCallback(cb, draggedPreview){
     google.script.run
       .withSuccessHandler(function(r){
         var ok = r && r.success !== false;
+        if(ok) _invalidateCaches();  // ★ 班表已改寫，前端快取失效
         var msg = r ? (r.message||r.summary||'寫入完成') : '寫入完成';
         cb((ok?'🎉 ':'⚠️ ')+msg, ok);
       })
@@ -5548,6 +5712,7 @@ function _qkPreviewWriteCallback(cb, draggedPreview){
         var ok = r && r.success !== false;
         var msg = r ? (r.message||r.summary||'寫入完成') : '寫入完成';
         if(!ok && r && r.preview) ok = true;
+        if(ok) _invalidateCaches();  // ★ 班表已改寫（quickSchedule 也可能建立新工作表），前端快取失效
         cb((ok?'🎉 ':'⚠️ ')+msg, ok);
       })
       .withFailureHandler(function(e){ cb('寫入失敗：'+e.message, false); })
@@ -5567,16 +5732,25 @@ function bind_qkModal(){
     var empFromQk = el('qkEmpId') ? el('qkEmpId').value.trim() : '';
     if(empFromQk) _fpArrangerEmpId = empFromQk;
     amsg('qkMsg','🔍 預覽中，請稍候…','#3949ab');
-    el('qkConfirmBtn').disabled = true;
+    // ★ ver4.8：等待數秒的節點，按鈕文字同步顯示處理中（原本只有小字訊息）
+    var _qkBtn = el('qkConfirmBtn');
+    if(_qkBtn && !_qkBtn.dataset.prevVal) _qkBtn.dataset.prevVal = _qkBtn.textContent;
+    function _qkBusy(on){
+      if(!_qkBtn) return;
+      _qkBtn.disabled = on;
+      _qkBtn.textContent = on ? '⏳ 排班預覽產生中…' : (_qkBtn.dataset.prevVal || _qkBtn.textContent);
+      if(!on) delete _qkBtn.dataset.prevVal;
+    }
+    _qkBusy(true);
     var monthName = el('qkMonthSel').value;
     if(!monthName){
       amsg('qkMsg','⚠️ 請選擇月份','#e65100');
-      el('qkConfirmBtn').disabled = false;
+      _qkBusy(false);
       return;
     }
     google.script.run
       .withSuccessHandler(function(r){
-        el('qkConfirmBtn').disabled = false;
+        _qkBusy(false);
         if(!r.success){
           amsg('qkMsg','❌ '+r.message,'var(--danger)'); return;
         }
@@ -5606,7 +5780,7 @@ function bind_qkModal(){
         }
       })
       .withFailureHandler(function(e){
-        el('qkConfirmBtn').disabled = false;
+        _qkBusy(false);
         amsg('qkMsg','預覽失敗：'+e.message,'var(--danger)');
       })
       .quickSchedule(adminPwd, 'preview', 'month',
@@ -5961,8 +6135,9 @@ function buildMonthPreviewHtml(r){
   var tip = document.createElement('div');
   tip.id = 'floatTip';
   document.body.appendChild(tip);
+  // ★ ver4.8：選擇器由 td[data-tip] 放寬為 [data-tip]（span/button 也能顯示浮標說明）
   document.addEventListener('mouseover', function(e){
-    var td = e.target.closest('td[data-tip]');
+    var td = e.target.closest('[data-tip]');
     if(!td) return;
     tip.textContent = td.dataset.tip;
     tip.style.display = 'block';
@@ -5972,9 +6147,23 @@ function buildMonthPreviewHtml(r){
     if(tip.style.display==='block') place(e);
   });
   document.addEventListener('mouseout', function(e){
-    var td = e.target.closest('td[data-tip]');
+    var td = e.target.closest('[data-tip]');
     if(td && !td.contains(e.relatedTarget)) tip.style.display='none';
   });
+  // ★ ver4.8：觸控裝置支援 — 點按帶 data-tip 的元素顯示浮標 2.5 秒（原本手機完全看不到換班紀錄）
+  document.addEventListener('touchstart', function(e){
+    var t = e.target.closest('[data-tip]');
+    if(!t){ tip.style.display='none'; return; }
+    tip.textContent = t.dataset.tip;
+    tip.style.display = 'block';
+    var r = t.getBoundingClientRect();
+    var tw = tip.offsetWidth||180, th = tip.offsetHeight||60;
+    var tx = Math.min(r.left, window.innerWidth - tw - 8);
+    var ty = (r.bottom + th > window.innerHeight - 8) ? (r.top - th - 6) : (r.bottom + 6);
+    tip.style.left = Math.max(4,tx)+'px'; tip.style.top = Math.max(4,ty)+'px';
+    clearTimeout(tip._tt);
+    tip._tt = setTimeout(function(){ tip.style.display='none'; }, 2500);
+  }, {passive:true});
   function place(e){
     var tx=e.clientX+14, ty=e.clientY+14;
     var tw=tip.offsetWidth||180, th=tip.offsetHeight||60;

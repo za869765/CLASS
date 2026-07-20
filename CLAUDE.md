@@ -15,7 +15,7 @@
 |------|------|
 | 前端 | `index.html` |
 | 後端 | `Code.gs` |
-| 內部版號 | ver4.7（2026-04-25 修 BUG39~42：UI 微調與重新預覽按鈕復原） |
+| 內部版號 | ver4.8（2026-07-20 效能優化＋穩定性修正＋UI 互動回饋，Codex 三輪交叉驗證） |
 
 ---
 
@@ -75,6 +75,18 @@
 | 40 | UI | 寫入成功後彈出 CSS 慶祝視窗（fpWriteSuccessOverlay）+ popBounce 動畫 + 4 秒自動關閉，明確讓使用者意識下一階段 |
 | 41 | UI | tab-quick 一鍵排班按鈕改 200×200 正方形 + qkPulseRing 光圈 + qkFingerTap 食指 👆 動畫；tab-pending 查詢按鈕同款設計（文字「查詢待審核班表」），吸引使用者點擊 |
 | 42 | BUG | 預覽 Modal 重新開啟時 fpWriteBtn / fpCancelBtn 仍保持寫入後變身狀態（核章列印 / 完成關閉）→ showFullPreview 開頭強制重置為 [✅ 確認寫入] [取消] 並重綁 onclick |
+
+### 第七輪（ver4.8，2026-07-20 效能＋穩定性＋UI，Codex 三輪交叉驗證）
+| 類別 | 摘要 |
+|------|------|
+| 效能 | 56 處 `SpreadsheetApp.openById` 統一改用 `getSpreadsheet()` 快取；`getScheduleData` 讀取合併（M1:N32 notes 一次讀、getScheduleChanges 的 I1:M11 名單一次讀） |
+| 效能 | 前端：onload 預抓 `getAvailableSheets`（`_preSheets` TTL 10 分）、移除 onload 無效 `loadRecs`、`loadHdrs` 改前端常數、`viewSched` 結果存 `_schedCache`（TTL 2 分）供一鍵列印重用；所有寫入/建表成功路徑呼叫 `_invalidateCaches()` |
+| 穩定性 | 新增 `withScriptLock` 共用鎖（tryLock＋深度計數防重入；搶不到鎖 throw／回忙碌，絕不無鎖執行）：套用 `updateShift`、`logShiftChange`、`writeOpLog`、`writeDragShiftLog`、`writeDraggedPreview`、`runAutoSchedule` 寫入段 |
+| 穩定性 | `confirmShift` 只認「換班成功」開頭為成功（原本後端失敗字串被前端當成功，畫面已改但試算表沒變）；`updateShift` headers 先讀再寫、日誌失敗回「換班成功!（提醒…）」不誤報整體失敗 |
+| 穩定性 | `writeDragShiftLog` 改收集後批次寫回（原日誌滿載時同批多筆互蓋只剩一筆）；`getScheduleChanges` 姓名不 filter，保持與員編列對齊 |
+| UI | `showLoad(txt)` 改全域 `#gLoad` overlay（原 `#lt` 藏於登入面板，Modal 流程不可見）；`button:disabled` 全域視覺；換班/驗證/預覽/儲存/統計流程鎖按鈕防連點；`#ale` shake、清單與班表格按壓回饋、`fullPreviewModal` 進場動畫 |
+| UI | floatTip 由 `td[data-tip]` 放寬為 `[data-tip]` 並支援觸控點按；`#tep`/fpZoom/異動 ✕ 鈕補 title；月份選單/換班視窗/預覽 Modal 補操作步驟說明 |
+| UI | 月份選單「📁 過去班表」收納：前端 `_rocStrToNum`＋`_sheetIsPast` 動態分組（與後端 `isSheetLocked` 同邏輯），過去月份摺疊、點擊展開、無當期班表時自動展開 |
 
 ---
 

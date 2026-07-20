@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver3.23 - 修正：卡介苗月份奇偶交替，全年公平輪替
+// ver4.8 - 效能優化（openById 快取/讀取合併）＋穩定性（ScriptLock/失敗誤報修正）
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -11,6 +11,26 @@ let _ss = null;
 function getSpreadsheet() {
   if (!_ss) _ss = SpreadsheetApp.openById(SHEET_ID);
   return _ss;
+}
+
+// ★ ScriptLock 共用鎖：序列化「掃空列→寫入」與班表寫入，避免多人同時操作互相覆蓋。
+//   同一次執行內巢狀呼叫（如 updateShift → logShiftChange）不重複取鎖。
+//   搶不到鎖時：有 onBusy 則回傳其結果（回覆使用者稍後再試），否則 throw（絕不退化為無鎖執行，
+//   由呼叫端既有 try/catch 決定放棄或回報）。
+let _scriptLockDepth = 0;
+function withScriptLock(timeoutMs, fn, onBusy) {
+  if (_scriptLockDepth > 0) return fn();
+  const lock = LockService.getScriptLock();
+  let got = false;
+  try { got = lock.tryLock(timeoutMs); }
+  catch (e) { Logger.log('withScriptLock tryLock error: ' + e.message); got = false; }
+  if (!got) {
+    if (onBusy) return onBusy();
+    throw new Error('系統忙碌中（多人同時操作），請稍後再試。');
+  }
+  _scriptLockDepth++;
+  try { return fn(); }
+  finally { _scriptLockDepth--; lock.releaseLock(); }
 }
 
 const GLOBAL_CONFIG = {
@@ -157,7 +177,7 @@ function parseDateFromSheet(dateStr, sheetName) {
 // 取得所有可用工作表
 // =============================================
 function getAvailableSheets() {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
   const allSheetNames = spreadsheet.getSheets().map(s => s.getName());
 
@@ -221,7 +241,7 @@ function rocNumToStr(n) {
 }
 
 function getAllScheduleSheets() {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const allSheetNames = spreadsheet.getSheets().map(s => s.getName());
   const scheduleSheets = allSheetNames.filter(n => n !== EMAIL_SHEET_NAME && n.includes('班表'));
   // 回傳「本年度全部」班表（含過去月份），依月份排序
@@ -239,7 +259,7 @@ function getAllScheduleSheets() {
 // ── 補寄用：取得指定月份每日有哪些人排班（預覽用）────────────────
 function getScheduleDatesWithDuties(sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const timezone    = spreadsheet.getSpreadsheetTimeZone();
     const sched = spreadsheet.getSheetByName(sheetName);
     if (!sched) return { success: false, dates: [] };
@@ -271,7 +291,7 @@ function getScheduleDatesWithDuties(sheetName) {
 
 
 function listAllSheets() {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   return spreadsheet.getSheets().map(s => s.getName());
 }
 
@@ -281,7 +301,7 @@ function listAllSheets() {
 // BUG20 連帶修正：不再硬編碼 115/2026，動態取當年度
 // =============================================
 function getAllYear115Sheets() {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const allNames = spreadsheet.getSheets().map(s => s.getName());
   const currentYear = new Date().getFullYear();
   const sheetsThisYear = allNames.filter(n => {
@@ -303,7 +323,7 @@ function getAllYear115Sheets() {
 function createScheduleSheet(adminPassword, year, month, sheetName) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     if (spreadsheet.getSheetByName(sheetName)) {
       return { success: false, message: '工作表「' + sheetName + '」已存在。' };
     }
@@ -448,7 +468,7 @@ function buildScheduleHtml(personName, daySchedules, isAuto) {
 function checkTomorrowScheduleAndSendEmail() {
   Logger.log('--- 開始執行每日班表提醒 ---');
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const timezone    = spreadsheet.getSpreadsheetTimeZone();
     const today       = new Date();
 
@@ -526,7 +546,7 @@ function checkTomorrowScheduleAndSendEmail() {
 function sendManualScheduleNotice(adminPassword, recipientNames, targetDate) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤' };
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const timezone    = spreadsheet.getSpreadsheetTimeZone();
     const settingSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
     const names   = settingSheet.getRange('I1:I11').getValues().flat();
@@ -567,7 +587,7 @@ function doGet() {
 
 function verifyAdminPassword(inputPassword) {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     return inputPassword === sheet.getRange(GLOBAL_CONFIG.AUTO_SCHEDULE.ADMIN_PASSWORD_RANGE).getValue().toString();
   } catch(e) { return false; }
 }
@@ -612,13 +632,15 @@ function getScheduleData(sheetName) {
   });
 
   // ★ 備註與換班紀錄：只在有需要時讀取
-  // 登革熱挪移備註（M欄）- 批次讀取
+  // 效能：M2:M32 swap 備註 + N1 審核狀態備註 合併為一次 M1:N32 getNotes
   let dengSwapDateMap = {};
+  let mnNotes = [];
   try {
-    const mNotes = sheet.getRange('M2:M32').getNotes();
-    mNotes.forEach((row, i) => {
+    mnNotes = sheet.getRange('M1:N32').getNotes(); // [row][0]=M欄, [row][1]=N欄
+    mnNotes.forEach((row, i) => {
+      if (i === 0) return; // M1 略過（原邏輯從 M2 起算）
       const note = row[0] ? row[0].toString().trim() : '';
-      if (note.startsWith('swap:')) dengSwapDateMap[i] = note.replace('swap:', '');
+      if (note.startsWith('swap:')) dengSwapDateMap[i - 1] = note.replace('swap:', '');
     });
   } catch(e) {}
 
@@ -627,7 +649,7 @@ function getScheduleData(sheetName) {
   let reviewStatus = ''; // 'pending'=審核中(僅檢視) | 'approved'=已核准 | ''=未設定
   let writeCount = 0;    // 排定次數（1=A, 2=B, ...）
   try {
-    const note = sheet.getRange('N1').getNote();
+    const note = (mnNotes.length && mnNotes[0][1]) ? mnNotes[0][1] : '';
     if (note) {
       note.split('\n').forEach(line => {
         if (line.startsWith('排定時間:'))  schedTime    = line.replace('排定時間:', '').trim();
@@ -675,7 +697,7 @@ function getScheduleData(sheetName) {
 }
 
 function getShiftChangeRecords(sheetName, empId) {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+  const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   return sheet.getRange('A40:A460').getValues().filter(r => r[0] !== "").map(r => r[0]);
 }
 
@@ -742,7 +764,7 @@ function setReviewStatus(adminPassword, sheetName, status) {
 }
 
 function getShiftOptions(column) {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+  const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const columnLetter = String.fromCharCode(64 + column);
   const range = GLOBAL_CONFIG.SHIFT_OPTIONS[columnLetter];
   let options = range ? sheet.getRange(range).getValues().flat().filter(o => o) : [];
@@ -754,29 +776,39 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
     return '參數錯誤，請聯絡管理員。';
   // ── 過去月份鎖定，拒絕寫入 ──────────────────────────────────
   if (isSheetLocked(sheetName)) return '🔒 此月份班表已鎖定，無法換班。';
-  try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = spreadsheet.getSheetByName(sheetName);
-    const row = findRowByDate(sheet, date.trim());
-    if (row === null) return '找不到日期，請確認班表資料。';
-    const oldShift = sheet.getRange(row, shiftColumn).getValue();
-    const newShift = newShifts.join(', ');
-    if (oldShift === newShift) return '班別未改變，無需更新。';
+  // ★ ScriptLock：讀舊值→寫新值→寫日誌 全程序列化，避免兩人同時換班互相覆蓋
+  return withScriptLock(8000, () => {
+    try {
+      const spreadsheet = getSpreadsheet();
+      const sheet = spreadsheet.getSheetByName(sheetName);
+      const row = findRowByDate(sheet, date.trim());
+      if (row === null) return '找不到日期，請確認班表資料。';
+      const oldShift = sheet.getRange(row, shiftColumn).getValue();
+      const newShift = newShifts.join(', ');
+      if (oldShift === newShift) return '班別未改變，無需更新。';
 
-    // 授權人員（verifyEmpId 已驗證）均可更換任何人的班次，無自身限制
-    sheet.getRange(row, shiftColumn).setValue(newShift);
-    const headers = sheet.getRange('C1:M1').getValues()[0];
-    const shiftType = headers[shiftColumn - 3] || '未知班別';
-    logShiftChange(sheetName, date.trim(), oldShift, newShift, shiftType, empId, remark);
-    if (sendEmail) {
-      try { sendEmailNotification(oldShift, newShift, date.trim(), shiftType); } catch(e) {}
-    }
-    return '換班成功!';
-  } catch (err) { return '系統錯誤，請聯絡管理員。'; }
+      // 授權人員（verifyEmpId 已驗證）均可更換任何人的班次，無自身限制
+      // ★ headers 先讀再寫入：寫入成功後不再有任何可 throw 的讀取，
+      //   避免「儲存格已改但回報系統錯誤」的部分寫入誤報
+      const headers = sheet.getRange('C1:M1').getValues()[0];
+      const shiftType = headers[shiftColumn - 3] || '未知班別';
+      sheet.getRange(row, shiftColumn).setValue(newShift);
+      // ★ 部分寫入修正：班表已寫入成功後，日誌寫入失敗不應回報整體失敗
+      //   （原本回「系統錯誤」會誤導使用者以為沒換到而重試，卻得到「班別未改變」）
+      let logWarn = '';
+      try {
+        logShiftChange(sheetName, date.trim(), oldShift, newShift, shiftType, empId, remark);
+      } catch(eLog) { logWarn = '（提醒：換班已生效，但日誌寫入失敗，請通知管理員）'; }
+      if (sendEmail) {
+        try { sendEmailNotification(oldShift, newShift, date.trim(), shiftType); } catch(e) {}
+      }
+      return '換班成功!' + logWarn;
+    } catch (err) { return '系統錯誤，請聯絡管理員。'; }
+  }, () => '⏳ 系統忙碌中（多人同時操作），請稍後再試。');
 }
 
 function findRowByDate(sheet, targetDate) {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const tz = spreadsheet.getSpreadsheetTimeZone();
   const dateRange = sheet.getRange('A2:B32').getValues();
 
@@ -827,32 +859,35 @@ function logShiftChange(sheetName, date, oldShift, newShift, shiftType, empId, r
       } catch(e) {}
     }
   }
-  const logSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-  const logRangeObj = logSheet.getRange('A40:A460');
-  const logRange = logRangeObj.getValues();
-  let logRow = 40;
-  let found = false;
-  for (let i = 0; i < logRange.length; i++) {
-    if (logRange[i][0] === "") { logRow = i + 40; found = true; break; }
-  }
-  if (!found) {
-    // bug #23 / #25: 原本 419 次個別 setValue/getValue 太慢易超時，且只迴圈到 i<459 → A460 那筆未被覆蓋會殘留。
-    // 改用 getValues/setValues 一次讀寫 + 整段往上 shift 一格，最後一格 A460 由 setValue 寫入新紀錄。
-    const shifted = [];
-    for (let i = 1; i < logRange.length; i++) shifted.push([logRange[i][0]]);
-    shifted.push(['']); // 末位先清空，等下方 setValue 寫入新紀錄
-    logRangeObj.setValues(shifted);
-    logRow = 460;
-  }
-  const empIdStr = empId ? `(${empId}) ` : '';
-  const remarkStr = remark ? ' 備註:' + remark.toString().trim().split('\n').join(' ') : '';
-  logSheet.getRange(logRow, 1).setValue(
-    `${dateWithDay} ${shiftType} 原${oldShift}→新${newShift} ${empIdStr}更換時間: ${new Date().toLocaleString()}${remarkStr}`
-  );
+  // ★ ScriptLock：掃空列→寫入 序列化，避免兩筆日誌寫進同一列互相覆蓋
+  withScriptLock(10000, () => {
+    const logSheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    const logRangeObj = logSheet.getRange('A40:A460');
+    const logRange = logRangeObj.getValues();
+    let logRow = 40;
+    let found = false;
+    for (let i = 0; i < logRange.length; i++) {
+      if (logRange[i][0] === "") { logRow = i + 40; found = true; break; }
+    }
+    if (!found) {
+      // bug #23 / #25: 原本 419 次個別 setValue/getValue 太慢易超時，且只迴圈到 i<459 → A460 那筆未被覆蓋會殘留。
+      // 改用 getValues/setValues 一次讀寫 + 整段往上 shift 一格，最後一格 A460 由 setValue 寫入新紀錄。
+      const shifted = [];
+      for (let i = 1; i < logRange.length; i++) shifted.push([logRange[i][0]]);
+      shifted.push(['']); // 末位先清空，等下方 setValue 寫入新紀錄
+      logRangeObj.setValues(shifted);
+      logRow = 460;
+    }
+    const empIdStr = empId ? `(${empId}) ` : '';
+    const remarkStr = remark ? ' 備註:' + remark.toString().trim().split('\n').join(' ') : '';
+    logSheet.getRange(logRow, 1).setValue(
+      `${dateWithDay} ${shiftType} 原${oldShift}→新${newShift} ${empIdStr}更換時間: ${new Date().toLocaleString()}${remarkStr}`
+    );
+  });
 }
 
 function sendEmailNotification(oldShift, newShift, targetDate, shiftType) {
-  const emailSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+  const emailSheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const namesRange = emailSheet.getRange('I1:I11').getValues().flat();
   const emailsRange = emailSheet.getRange('L1:L11').getValues().flat();
   let emails = [];
@@ -878,7 +913,7 @@ function sendEmailNotification(oldShift, newShift, targetDate, shiftType) {
 function verifyEmpIdForPerson(empId, personName) {
   if (!empId || !personName) return false;
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const names  = sheet.getRange('I1:I11').getValues().flat().map(s => s.toString().trim());
     // H欄：與 I欄平行的員工編號（也接受 M欄作為後備）
     const hIds   = sheet.getRange('H1:H11').getValues().flat().map(s => s.toString().trim());
@@ -906,7 +941,7 @@ function verifyEmpIdForPerson(empId, personName) {
 function verifyEmpId(empId) {
   if (!empId) return false;
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const empIds = sheet.getRange('M1:M11').getValues().flat().map(String);
     let norm = empId;
     if (empId.length > 0 && isNaN(parseInt(empId.charAt(0))))
@@ -939,9 +974,12 @@ function getScheduleChanges(sheetName, preloadedHeaders) {
     }
     const hdrSet = new Set(sheetHdrs.map(h => h ? h.toString().trim() : '').filter(h => h));
 
-    // 讀取員工名單，供 empId → name 轉換
-    const staffNames = settingSheet.getRange('I1:I11').getValues().flat().map(String).filter(n=>n.trim());
-    const staffEmpIds = settingSheet.getRange('M1:M11').getValues().flat().map(String);
+    // 讀取員工名單，供 empId → name 轉換（效能：I 欄姓名 + M 欄員編合併為一次 I1:M11 讀取）
+    // ★ 修正：姓名不做 filter，保持與員編逐列對齊（原 filter 在名單中間有空白列時會錯位，
+    //   讓換班紀錄顯示成錯的人）；空白姓名由 empIdToName 內的 truthy 檢查略過。
+    const staffBlock  = settingSheet.getRange('I1:M11').getValues();
+    const staffNames  = staffBlock.map(r => String(r[0]));
+    const staffEmpIds = staffBlock.map(r => String(r[4]));
     function empIdToName(eid) {
       if (!eid) return '';
       const norm = id => (id.length>0 && isNaN(parseInt(id.charAt(0))))
@@ -1020,7 +1058,7 @@ function escapeHtml(text) {
 
 function logError(msg) {
   try {
-    const logSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const logSheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     logSheet.getRange('B40').setValue(`[${new Date().toLocaleString()}] ${msg}`);
   } catch(e) {}
 }
@@ -1028,22 +1066,25 @@ function logError(msg) {
 // ── 操作紀錄（M40:M460）────────────────────────────────────────────
 function writeOpLog(action, detail) {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-    const raw   = sheet.getRange(GLOBAL_CONFIG.OP_LOG_RANGE).getValues();
-    let row = 40;
-    for (let i = 0; i < raw.length; i++) {
-      if (!raw[i][0]) { row = i + 40; break; }
-      if (i === raw.length - 1) row = 40; // 滿了就覆蓋最舊的
-    }
-    const tz  = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
-    const ts  = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm:ss');
-    sheet.getRange(row, 13).setValue(`[${ts}] [${action}] ${detail}`);
+    // ★ ScriptLock：掃空列→寫入 序列化，避免兩筆操作紀錄寫進同一列互相覆蓋
+    withScriptLock(5000, () => {
+      const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+      const raw   = sheet.getRange(GLOBAL_CONFIG.OP_LOG_RANGE).getValues();
+      let row = 40;
+      for (let i = 0; i < raw.length; i++) {
+        if (!raw[i][0]) { row = i + 40; break; }
+        if (i === raw.length - 1) row = 40; // 滿了就覆蓋最舊的
+      }
+      const tz  = getSpreadsheet().getSpreadsheetTimeZone();
+      const ts  = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm:ss');
+      sheet.getRange(row, 13).setValue(`[${ts}] [${action}] ${detail}`);
+    });
   } catch(e) {}
 }
 
 function getOperationLog() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const rows  = sheet.getRange(GLOBAL_CONFIG.OP_LOG_RANGE).getValues();
     const logs  = rows.map(r => r[0] ? r[0].toString() : '').filter(v => v);
     return { success: true, logs: logs.reverse() }; // 最新在前
@@ -1053,7 +1094,7 @@ function getOperationLog() {
 // ── 通知名單（Z欄 TRUE/FALSE）────────────────────────────────────────
 function getNotifySettings() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const names   = sheet.getRange('I1:I11').getValues().flat();
     const emails  = sheet.getRange('L1:L11').getValues().flat();
     const notify  = sheet.getRange(GLOBAL_CONFIG.NOTIFY_RANGE).getValues().flat();
@@ -1074,7 +1115,7 @@ function getNotifySettings() {
 function saveNotifySettings(adminPassword, settings) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤' };
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     (settings || []).forEach(function(s) {
       const r = Number(s._row);
       if (r < 0 || r > 10) return;
@@ -1093,7 +1134,7 @@ function saveNotifySettings(adminPassword, settings) {
 
 function getStaffList() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const cfg = GLOBAL_CONFIG.AUTO_SCHEDULE;
     const names      = sheet.getRange(cfg.STAFF_RANGE).getValues().flat();
     const empIds     = sheet.getRange(cfg.EMPID_RANGE).getValues().flat().map(String);
@@ -1145,7 +1186,7 @@ function getPointsDashboard() {
 // 統計 E~K 欄（門診、流注1/2、預登1/2、預注1/2）全年各月累積
 function getYearlyClinicStats() {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const now      = new Date();
     const year     = now.getFullYear();
     const rocYear  = year - 1911;
@@ -1447,7 +1488,7 @@ function quickSchedule(adminPassword, mode, scope, month, targetYear) {
     return { success: false, message: '整年排班功能已停用，請逐月排班。' };
   }
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     {
       // 單月：若工作表不存在先建立
       if (!spreadsheet.getSheetByName(month)) {
@@ -1476,7 +1517,7 @@ function quickSchedule(adminPassword, mode, scope, month, targetYear) {
 
 // 取得所有115年班表名稱（含已存在 + 未來可建立的），供單月選單用
 function getAllPossibleSheets(targetYear) {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const useYear  = targetYear ? Number(targetYear) : new Date().getFullYear();
   const rocY     = useYear - 1911;
   const rocPfx   = rocNumToStr(rocY);
@@ -1504,8 +1545,8 @@ function getAllPossibleSheets(targetYear) {
 }
 function getSystemSettings() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-    const tz     = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    const tz     = getSpreadsheet().getSpreadsheetTimeZone();
     const names  = sheet.getRange('I1:I11').getValues().flat();
     const empIds = sheet.getRange('M1:M11').getValues().flat();
     const emails = sheet.getRange('L1:L11').getValues().flat();
@@ -1549,7 +1590,7 @@ function getSystemSettings() {
 function saveSystemSettings(adminPassword, settings) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     if (settings.staff) {
       // 用 _row 精準定位，避免陣列索引因空格而錯位
       settings.staff.forEach(function(s) {
@@ -1581,7 +1622,7 @@ function saveSystemSettings(adminPassword, settings) {
 function setSuccessor(adminPassword, rowIndex, newStaff) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤' };
   try {
-    const ss    = SpreadsheetApp.openById(SHEET_ID);
+    const ss    = getSpreadsheet();
     const sheet = ss.getSheetByName(EMAIL_SHEET_NAME);
     const tz    = ss.getSpreadsheetTimeZone();
     if (rowIndex < 0 || rowIndex > 10) return { success: false, message: '無效的崗位列號' };
@@ -1668,7 +1709,7 @@ function replaceInRange_(sheet, rangeA1, oldName, newName) {
 function resetStaffPoints(name, adminPassword) {
   if (!verifyAdminPassword(adminPassword)) return '管理員密碼錯誤，無法執行清算。';
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const names = sheet.getRange(GLOBAL_CONFIG.AUTO_SCHEDULE.STAFF_RANGE).getValues().flat();
     const idx = names.indexOf(name);
     if (idx === -1) return `找不到人員：${name}`;
@@ -1787,7 +1828,7 @@ function rocStrToNum(str) {
 }
 
 function getShiftStaffMap() {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+  const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const result = {};
   const cols = ['C','D','E','F','G','H','I','J','K','L','M'];
   cols.forEach(col => {
@@ -1831,7 +1872,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
   } catch(e) { _shiftDayRulesCache = null; }
 
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const sheet       = spreadsheet.getSheetByName(sheetName);
     if (!sheet) return { success: false, message: '找不到工作表：' + sheetName };
 
@@ -2731,6 +2772,9 @@ function runAutoSchedule(sheetName, adminPassword, options) {
 
     // ── 寫入試算表 ──────────────────────────────────────────────────
     if (!options.dryRun) {
+      // ★ ScriptLock：整表寫入＋N1＋M欄 notes 序列化，避免與換班/拖曳寫入交錯。
+      //   搶不到鎖會 throw → 整批不寫入，錯誤回報給前端（不會留下半套狀態）。
+      withScriptLock(10000, () => {
       // ★ 強制 A2:A32 為純文字，確保日期不被轉成 Date 物件
       sheet.getRange('A2:A32').setNumberFormat('@');
       sheet.getRange('C2:M32').setValues(result);
@@ -2775,6 +2819,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       if (options.sendNotify) {
         try { sendAutoScheduleNotification(sheetName, staff); } catch(e) {}
       }
+      });
     }
 
     const successMsg = `${sheetName} 排班完成！（${year}年${month}月，共 ${result.length} 天，卡介苗：${bcgPersonThisMonth||'未定'}）`;
@@ -2838,7 +2883,7 @@ function sendWeeklyNotification(sheetName, adminPassword) {
 // ── 取得某月可選日期（for 手動補寄 UI）────────────────────────────
 function getScheduleDates(sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const timezone    = spreadsheet.getSpreadsheetTimeZone();
     const sched = spreadsheet.getSheetByName(sheetName);
     if (!sched) return { success: false, dates: [] };
@@ -2871,7 +2916,7 @@ function getScheduleDates(sheetName) {
 // =============================================
 function getScheduleStats(sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const headers = GLOBAL_CONFIG.SHIFT_HEADERS;
     const staff = getStaffList();
     const staffNames = staff.map(s => s.name);
@@ -2946,8 +2991,8 @@ function getScheduleStats(sheetName) {
  */
 function getExclusionList() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-    const tz    = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    const tz    = getSpreadsheet().getSpreadsheetTimeZone();
     const raw   = sheet.getRange(GLOBAL_CONFIG.EXCLUSION_RANGE).getValues();
 
     // 日期格式化：若儲存格是 Date 物件則轉成 M/d，否則直接取字串
@@ -2971,7 +3016,7 @@ function getExclusionList() {
 function saveExclusionList(adminPassword, list) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     sheet.getRange(GLOBAL_CONFIG.EXCLUSION_RANGE).clearContent();
     if (list && list.length > 0) {
       const values = list.slice(0, 30).map(item => [
@@ -3077,7 +3122,7 @@ function isStaffActiveForMonth(staffObj, schedYear, schedMonth) {
  */
 function getPersonalStats(personName, sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const headers = GLOBAL_CONFIG.SHIFT_HEADERS;
 
     // 決定工作表清單
@@ -3178,7 +3223,7 @@ function getStaffNames() {
 // =============================================
 function getOvertimeStats(sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const staff = getStaffList();
     const staffNames = staff.map(s => s.name);
 
@@ -3285,7 +3330,7 @@ function getOvertimeStats(sheetName) {
 // =============================================
 function getHolidayAttendanceStats(sheetName) {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const staff = getStaffList();
     const staffNames = staff.map(s => s.name);
 
@@ -3410,7 +3455,7 @@ function getHolidayAttendanceStats(sheetName) {
 
 // ─── 讀取完整 Line Bot 設定 ─────────────────────────────────────
 function getLineBotConfig() {
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+  const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
 
   // R1：Token
   const token = sheet.getRange(GLOBAL_CONFIG.LINE_TOKEN_RANGE).getValue().toString().trim();
@@ -3465,7 +3510,7 @@ function getLineBotSettings() {
 function updateLineBotSettings(adminPassword, token, keyword, fuzzy) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     if (token && token.trim() !== '') {
       sheet.getRange(GLOBAL_CONFIG.LINE_TOKEN_RANGE).setValue(token.trim());
     }
@@ -3673,7 +3718,7 @@ function processLineEvent(bodyStr) {
 
 // ─── 班表搜尋核心 ───────────────────────────────────────────────
 function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const tz = spreadsheet.getSpreadsheetTimeZone();
   const kw = keyword.toLowerCase();
   const results = [];
@@ -4253,7 +4298,7 @@ function makeAqiMessage() {
 // API Key 存於「班表設定」R18 儲存格
 function askGemini(question) {
   try {
-    var sheet  = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    var sheet  = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     var apiKey = sheet.getRange(GLOBAL_CONFIG.GEMINI_API_KEY_RANGE).getValue().toString().trim();
     if (!apiKey) return '⚠️ 尚未設定 Gemini API Key（班表設定 R18）';
 
@@ -4436,9 +4481,9 @@ function diagLineBot() {
 // 格式：每格一行，C欄~M欄共11個職務
 function getShiftColumnConfig() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     // C1:M1 直接讀班表第一列的欄位標題（最權威的來源）
-    const allSheets = SpreadsheetApp.openById(SHEET_ID).getSheets()
+    const allSheets = getSpreadsheet().getSheets()
       .filter(s => s.getName() !== EMAIL_SHEET_NAME && s.getName().includes('年'));
     let headers = GLOBAL_CONFIG.SHIFT_HEADERS.slice();
     if (allSheets.length > 0) {
@@ -4450,7 +4495,7 @@ function getShiftColumnConfig() {
 }
 // 在 GAS 編輯器手動執行一次即可修復所有已建立的班表
 function fixAllSheetDateFormats() {
-  const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const spreadsheet = getSpreadsheet();
   const tz = spreadsheet.getSpreadsheetTimeZone();
   const sheets = spreadsheet.getSheets();
   let fixed = 0;
@@ -5482,7 +5527,7 @@ const SHIFT_DAY_DEFAULTS = {
 function resolveEmpIdToName(empId) {
   if (!empId) return '';
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const names  = sheet.getRange('I1:I11').getValues().flat().map(s => s.toString().trim());
     const mIds   = sheet.getRange('M1:M11').getValues().flat().map(s => s.toString().trim());
     const norm   = id => (id.length>0 && isNaN(parseInt(id.charAt(0))))
@@ -5500,13 +5545,11 @@ function resolveEmpIdToName(empId) {
 function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
   try {
     const arrangerName = resolveEmpIdToName(arrangerEmpId) || arrangerEmpId;
-    const logSheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
-    const logRange = logSheet.getRange('A40:A460').getValues();
-    let logRow = 40;
-    for (let i = 0; i < logRange.length; i++) {
-      if (!logRange[i][0]) { logRow = i + 40; break; }
-      if (i === logRange.length - 1) logRow = 460;
-    }
+    // ★ ScriptLock：掃空列→逐筆寫入 序列化，避免與其他日誌寫入互相覆蓋
+    withScriptLock(10000, () => {
+    const logSheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    const logRangeObj = logSheet.getRange('A40:A460');
+    const logRange = logRangeObj.getValues();
 
     // ★ 建立去重集合：從現有日誌提取「排班者/審核者+日期+欄位+原→新」作為 key
     // 格式：「排班-XXX D/D 欄位 原A→新B」或「審核-XXX D/D 欄位 原A→新B」（忽略時間和備註）
@@ -5521,9 +5564,12 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
       if (keyMatch) existingKeys.add(keyMatch[1]);
     });
 
-    const tz = SpreadsheetApp.openById(SHEET_ID).getSpreadsheetTimeZone();
+    const tz = getSpreadsheet().getSpreadsheetTimeZone();
     const ts = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
-    let written = 0;
+    // ★ 修正：先收集新紀錄，最後一次 setValues 批次寫回。
+    //   原逐筆 setValue 寫法在日誌區滿載時 logRow 被封頂在 460，同批多筆會互相覆蓋只剩最後一筆；
+    //   批次寫回改為「既有＋新增，保留最新 421 筆」（滿載時最舊的被擠掉），且寫入次數 N 次 → 1 次。
+    const newEntries = [];
     (logs || []).forEach(log => {
       const remarkStr = log.reason ? ' 備註:' + log.reason.trim() : '';
       const prefix = log.isAudit ? `審核-${arrangerName}` : `排班-${arrangerName}`;
@@ -5531,10 +5577,8 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
       if(log.oldName !== log.newName){
         const key1 = `${prefix} ${d1} ${log.header} 原${log.oldName||'–'}→新${log.newName||'–'}`;
         if(!existingKeys.has(key1)){
-          logSheet.getRange(logRow, 1).setValue(`${key1} 更換時間: ${ts}${remarkStr}`);
+          newEntries.push(`${key1} 更換時間: ${ts}${remarkStr}`);
           existingKeys.add(key1);
-          logRow = Math.min(logRow + 1, 460);
-          written++;
         }
       }
       const d2 = (log.date2||'').split(' ')[0];
@@ -5542,14 +5586,19 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
          !(d1===d2 && log.header===log.header2)){
         const key2 = `${prefix} ${d2} ${log.header2} 原${log.oldName2||'–'}→新${log.newName2||'–'}`;
         if(!existingKeys.has(key2)){
-          logSheet.getRange(logRow, 1).setValue(`${key2} 更換時間: ${ts}${remarkStr}`);
+          newEntries.push(`${key2} 更換時間: ${ts}${remarkStr}`);
           existingKeys.add(key2);
-          logRow = Math.min(logRow + 1, 460);
-          written++;
         }
       }
     });
-    if(written > 0) writeOpLog('排班拖曳', `${sheetName} ${logs[0]?.isAudit?'審核者':'排班者'}${arrangerName} 異動 ${written} 筆（去重後）`);
+    if(newEntries.length > 0){
+      const merged = logRange.map(r => r[0]).filter(v => v !== '' && v != null).concat(newEntries);
+      const keep = merged.slice(Math.max(0, merged.length - logRange.length));
+      const out = keep.concat(new Array(logRange.length - keep.length).fill('')).map(v => [v]);
+      logRangeObj.setValues(out);
+      writeOpLog('排班拖曳', `${sheetName} ${logs[0]?.isAudit?'審核者':'排班者'}${arrangerName} 異動 ${newEntries.length} 筆（去重後）`);
+    }
+    });
   } catch(e) { Logger.log('writeDragShiftLog error: ' + e.message); }
 }
 
@@ -5558,12 +5607,14 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
 function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
-    const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+    const spreadsheet = getSpreadsheet();
     const sheet = spreadsheet.getSheetByName(sheetName);
     if (!sheet) return { success: false, message: '找不到工作表：' + sheetName };
     if (!Array.isArray(previewRows) || !previewRows.length)
       return { success: false, message: '預覽資料為空。' };
 
+    // ★ ScriptLock：整表寫入＋notes＋N1 版次 序列化，避免與換班/其他寫入交錯
+    return withScriptLock(10000, () => {
     // Sanitize: ensure each row has exactly 11 cols (C:M), replace null/undefined with ''
     const rows = previewRows.map(function(row) {
       var r = Array.isArray(row) ? row.slice(0, 11) : [];
@@ -5633,6 +5684,7 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
       message: `${sheetName} 排班完成（含拖曳調整）！（共 ${rows.length} 天）`,
       writeLetter: letter
     };
+    }, () => ({ success: false, message: '⏳ 系統忙碌中（多人同時操作），請稍後再試。' }));
   } catch(e) {
     return { success: false, message: '寫入失敗：' + e.message };
   }
@@ -5640,7 +5692,7 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
 
 function getShiftDayRules() {
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const stored = sheet.getRange('N3:N13').getValues().flat();
     const result = {};
     // 讀取已儲存的規則
@@ -5667,7 +5719,7 @@ function getShiftDayRules() {
 function saveShiftDayRules(adminPassword, rules) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤' };
   try {
-    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(EMAIL_SHEET_NAME);
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     // Clear N3:N13
     sheet.getRange('N3:N13').clearContent();
     const rows = [];
