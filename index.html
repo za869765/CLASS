@@ -356,7 +356,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
       </button>
     </div>
     <div class="lx-panel-footer">
-      <span class="lx-ver">ver 4.7</span>
+      <span class="lx-ver">ver 4.8</span>
       <span>佳里區衛生所 ©2026</span>
     </div>
     <div id="lt"><div class="sp" style="border-color:rgba(43,120,214,.2);border-top-color:var(--lx-blue1)"></div></div>
@@ -1471,6 +1471,11 @@ function amsg(id,msg,color){var e=el(id);e.style.display='block';e.style.color=c
 /* ── init ── */
 window.onload=function(){
   try{ bind(); }catch(e){ console.error('bind error:',e); }
+  // ★ ver4.8：登入頁版號改由 meta[name=version] 同步，版號只需維護 meta 一處
+  try{
+    var _vt=document.querySelector('.lx-ver'), _vm=document.querySelector('meta[name=version]');
+    if(_vt&&_vm&&_vm.content) _vt.textContent=_vm.content.replace(/^ver/,'ver ');
+  }catch(e){}
   try{ loadHdrs(); }catch(e){}
   // ★ 效能：開頁即預抓班表清單（原本等按「進入班表」才抓，使用者要等 1.5~2.5 秒）
   //   原本此處的 loadRecs() 已移除：當時 selSheet 尚未選定，抓完 viewSched 也會隱藏面板，純浪費
