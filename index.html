@@ -165,6 +165,9 @@ input[type=button]:active,button:active{transform:scale(.97)}
 /* ver4.7：系統挪移格用深橙 + outline，與假日 row 的淡橙背景區分 */
 #fpTable td.fp-swap{background:#ffcc80!important;color:#bf360c!important;font-weight:900!important;outline:2px solid #f57c00;outline-offset:-2px;box-shadow:inset 0 0 0 1px #fff}
 #fpTable td.fp-empty{color:#ccc;font-weight:400}
+/* ver4.9：hover 人名 → 該人其他班閃爍標示（inset box-shadow 疊色，不與格子底色打架） */
+@keyframes fpHlPulse{0%,100%{box-shadow:inset 0 0 0 999px rgba(255,152,0,.18)}50%{box-shadow:inset 0 0 0 999px rgba(255,152,0,.5)}}
+#fpTable td.fp-hl{outline:2.5px solid #ff9800;outline-offset:-2px;animation:fpHlPulse .8s ease-in-out infinite;font-weight:900!important}
 .pn{color:var(--admin);font-weight:700}
 .apg{display:flex;gap:8px;align-items:center;margin-bottom:14px}
 .apg input{flex:1;padding:10px 14px;border:1.5px solid #d1c4e9;border-radius:8px;font-size:.95rem;background:#fafafa;outline:none;font-family:var(--f);width:auto;margin:0;box-shadow:none}
@@ -3689,9 +3692,33 @@ function attachFpCellTips(){
       td.removeAttribute('data-tip');
       td.removeAttribute('data-tip-html');
     }
+    // ver4.9：同名格閃爍標示——指著人名時，他本月其他班的格子一起亮
+    fpClearHl();
+    if(name && _fpPreviewData){
+      var pvH = _fpPreviewData.preview || [];
+      for(var ri2 = 0; ri2 < pvH.length; ri2++){
+        var rowH = pvH[ri2] || [];
+        for(var ci2 = 0; ci2 <= 10; ci2++){
+          if(ri2 === rowIdx && ci2 === ci) continue;  // 自己這格不閃
+          var v2 = rowH[ci2];
+          if(v2 && v2.toString().trim() === name){
+            var td2 = getFpTd(ri2, ci2);
+            if(td2) td2.classList.add('fp-hl');
+          }
+        }
+      }
+    }
   };
   tbl.onmouseover  = handler;  // 桌機 hover（在 document floatTip 監聽前先算好 data-tip）
   tbl.ontouchstart = handler;  // 觸控點按同樣先算好
+  tbl.onmouseleave = fpClearHl; // 離開表格 → 清除閃爍
+}
+
+// ver4.9：清除同名格閃爍標示
+function fpClearHl(){
+  var tbl = el('fpTable');
+  if(!tbl) return;
+  tbl.querySelectorAll('td.fp-hl').forEach(function(c){ c.classList.remove('fp-hl'); });
 }
 
 function makeFpTableAddable(){
