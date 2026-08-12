@@ -3621,15 +3621,17 @@ function fpCellStatsTip(name){
     // 門診崗位：週二/週四分開（週四的預登1＝癌篩掛號）
     var hDiag2=hdrs2[2]||'門診', hReg2=hdrs2[3]||'掛號', hFront2=hdrs2[4]||'前台',
         hPre1b=hdrs2[5]||'預登1', hPre2b=hdrs2[6]||'預登2注', hJab1b=hdrs2[7]||'注射1', hJab2b=hdrs2[8]||'注射2';
+    // ver4.9：兩項之間用「／」分隔；注射依業務配對——兒童預防注射1跟2同行（週二）、成人疫苗注射獨立行（週四）
     var items = [
       hDiag2+'(二) '+clT[0],  hDiag2+'(四) '+clH[0],
       hReg2+' '+(clT[1]+clH[1]), hFront2+' '+(clT[2]+clH[2]),
       hPre1b+'(二) '+clT[3],  '癌篩掛號 '+clH[3],
       hPre2b+'(二) '+clT[4],  '機動 '+clH[4],
-      '兒童預防注射1 '+clT[5], '成人疫苗注射1 '+clH[5],
-      '兒童預防注射2 '+(clT[6]+clH[6])
+      '兒童預防注射1 '+clT[5], '兒童預防注射2 '+clT[6],
+      '成人疫苗注射1 '+clH[5]
     ];
-    for(var j=0;j<items.length;j+=2){ L.push(items.slice(j,j+2).join('、')); }
+    if(clH[6] > 0) items.push('成人疫苗注射2 '+clH[6]);
+    for(var j=0;j<items.length;j+=2){ L.push(items.slice(j,j+2).join(' ／ ')); }
     // 資格關卡一律顯示：有受訓＝次數（0也顯示），無受訓＝標示
     var inBcg = (_fpPreviewData.bcgStaff||[]).indexOf(name)!==-1;
     var inCog = (_fpPreviewData.cogStaff||[]).indexOf(name)!==-1;
@@ -3641,7 +3643,7 @@ function fpCellStatsTip(name){
   if(c.duty+c.dutyH) other.push('值班 '+(c.duty+c.dutyH)+'（平'+c.duty+'/假'+c.dutyH+'）');
   if(c.supp) other.push('支援 '+c.supp);
   if(c.deng+c.dengH) other.push('停班2線 '+(c.deng+c.dengH)+'（平'+c.deng+'/假'+c.dengH+'）');
-  if(other.length) L.push(other.join('、'));
+  if(other.length) L.push(other.join(' ／ '));
   return L.join('\n');
 }
 
