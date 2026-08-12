@@ -3878,9 +3878,9 @@ function showAddPicker(td, rowIdx, ci, replaceMode){
     var avg = nurses.length > 0 ? (nurses.reduce(function(s2,nm){ return s2+(monthTotalCount[nm]||0); },0)/nurses.length) : 0;
     var diffStr = mt < Math.round(avg) ? ' <span style="color:#c62828;font-size:'+(isClinicPicker?'.72rem':'.65rem')+'">少'+(Math.round(avg)-mt)+'</span>' : '';
     var safeName = n.replace(/\\/g,'\\\\').replace(/"/g,'&quot;');
-    // ver4.9：門診類選單 hover 人名 → 表格同步閃爍該人的門診~卡介/高齡班格
+    // ver5.1：門診類選單 hover 人名 → 表格閃爍該人門診班格＋選單側邊顯示本月明細浮標
     var hoverAttr = isClinicPicker
-      ? ' onmouseover="fpHlByName(&quot;'+safeName+'&quot;)" onmouseout="fpClearHl()"'
+      ? ' onmouseover="fpPickerTip(&quot;'+safeName+'&quot;, event)" onmouseout="fpPickerTipHide()"'
       : '';
     var itemPad = isClinicPicker ? '10px 18px' : '6px 14px';
     var nameFs  = isClinicPicker ? '.95rem' : '.85rem';
@@ -3920,7 +3920,32 @@ function hideAddPicker(){
   var picker = el('fpAddPicker');
   if(picker) picker.style.display = 'none';
   _fpAddTarget = null;
-  fpClearHl();  // ver4.9：關閉選單同步清除同名格閃爍
+  fpPickerTipHide();  // ver5.1：關閉選單同步收掉明細浮標＋清除同名格閃爍
+}
+
+// ver5.1：替換選單 hover 候選人 → 表格閃爍＋本月明細浮標（固定貼選單側邊，不蓋名單、不跟游標跑）
+function fpPickerTip(name, evt){
+  fpHlByName(name);
+  var tip = el('floatTip');
+  var picker = el('fpAddPicker');
+  if(!tip || !picker || !name || typeof fpCellStatsTip !== 'function') return;
+  tip.innerHTML = fpCellStatsTip(name);   // 系統自產 HTML（已跳脫）
+  tip._pinned = true;                     // 釘住：不讓 mousemove 把它拉回游標
+  tip.style.display = 'block';
+  var r  = picker.getBoundingClientRect();
+  var tw = tip.offsetWidth  || 260;
+  var th = tip.offsetHeight || 200;
+  // 優先貼選單右側；右邊放不下改貼左側
+  var lx = r.right + 8;
+  if(lx + tw > window.innerWidth - 8) lx = Math.max(4, r.left - tw - 8);
+  var ty = evt ? Math.min(Math.max(8, evt.clientY - th / 2), window.innerHeight - th - 8) : r.top;
+  tip.style.left = lx + 'px';
+  tip.style.top  = Math.max(8, ty) + 'px';
+}
+function fpPickerTipHide(){
+  var tip = el('floatTip');
+  if(tip){ tip.style.display = 'none'; tip._pinned = false; }
+  fpClearHl();
 }
 
 // ver4.9：依人名閃爍其「門診~卡介苗/高齡認知」班格（ci 2~9，替換選單 hover 用）
@@ -6577,11 +6602,12 @@ function buildMonthPreviewHtml(r){
     // ver4.9：data-tip-html 優先（僅系統自產統計浮標使用、內容已跳脫），其餘照舊純文字防注入
     if(td.dataset.tipHtml) tip.innerHTML = td.dataset.tipHtml;
     else tip.textContent = td.dataset.tip || '';
+    tip._pinned = false;  // ver5.1：一般浮標跟游標走
     tip.style.display = 'block';
     place(e);
   });
   document.addEventListener('mousemove', function(e){
-    if(tip.style.display==='block') place(e);
+    if(tip.style.display==='block' && !tip._pinned) place(e);  // ver5.1：釘住的浮標（替換選單明細）不跟游標
   });
   document.addEventListener('mouseout', function(e){
     var td = e.target.closest('[data-tip],[data-tip-html]');
@@ -6590,9 +6616,10 @@ function buildMonthPreviewHtml(r){
   // ★ ver4.8：觸控裝置支援 — 點按帶 data-tip 的元素顯示浮標 2.5 秒（原本手機完全看不到換班紀錄）
   document.addEventListener('touchstart', function(e){
     var t = e.target.closest('[data-tip],[data-tip-html]');
-    if(!t){ tip.style.display='none'; return; }
+    if(!t){ tip.style.display='none'; tip._pinned=false; return; }
     if(t.dataset.tipHtml) tip.innerHTML = t.dataset.tipHtml;
     else tip.textContent = t.dataset.tip || '';
+    tip._pinned = false;  // ver5.1：觸控浮標照舊定位
     tip.style.display = 'block';
     var r = t.getBoundingClientRect();
     var tw = tip.offsetWidth||180, th = tip.offsetHeight||60;
