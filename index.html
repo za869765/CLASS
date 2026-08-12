@@ -2642,6 +2642,7 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
   el('fullPreviewModal').style.display = 'block';
   setTimeout(function(){
     makeFpTableDraggable();
+    attachFpCellTips();  // ver4.9：人名格浮標＝本月明細
     // 先恢復黃色，再標記空格子可新增
     Object.keys(_fpCellMap).forEach(function(k){
       var entry = _fpCellMap[k];
@@ -3281,7 +3282,7 @@ function rebuildFpTable(){
   html += '</tbody>';
   el('fpTable').innerHTML = html;
   applyFpFontSize();
-  setTimeout(function(){ makeFpTableDraggable(); makeFpTableAddable(); }, 50);
+  setTimeout(function(){ makeFpTableDraggable(); makeFpTableAddable(); attachFpCellTips(); }, 50);
 }
 
 function bindFpReasonInputs(){} // no-op: reason inputs are in drag panel only
@@ -3407,9 +3408,9 @@ function buildFpStats(){
     {key:hReg,         label:'掛號',        title:'掛號（週四）',     bg:'#dcedc8'},
     {key:hFront,       label:'前台',        title:'前台（週四）',     bg:'#e0f7fa'},
     {key:hPre1+'_二',  label:'預登1(二)',   title:'預登1（週二）',    bg:'#b3e5fc'},
-    {key:hPre1+'_四',  label:'預登1(四)',   title:'預登1（週四）',    bg:'#81d4fa'},
+    {key:hPre1+'_四',  label:'癌篩掛號',    title:'癌篩掛號（週四，欄位=預登1）', bg:'#81d4fa'},
     {key:hPre2+'_二',  label:'預登2(二)',   title:'預登2注（週二）',  bg:'#b2ebf2'},
-    {key:hPre2+'_四',  label:'預登2(四)',   title:'預登2注（週四）',  bg:'#80deea'},
+    {key:hPre2+'_四',  label:'機動',        title:'機動（週四，癌篩協助或協助打針，欄位=預登2注）', bg:'#80deea'},
     {key:hJab1+'_二',  label:'注射1(二)',   title:'注射1（週二）',    bg:'#fff9c4'},
     {key:hJab1+'_四',  label:'注射1(四)',   title:'注射1（週四）',    bg:'#fff176'},
     {key:hJab2,        label:'注射2',       title:'注射2（週二）',    bg:'#ffe082'},
@@ -3521,6 +3522,93 @@ function fpSlotActive(rowIdx, ci){
 function fpLType(rowIdx){
   var lts = _fpPreviewData && _fpPreviewData.lTypes || [];
   return lts[rowIdx] || '';
+}
+
+// ── ver4.9：格子浮標＝該人本月各關卡明細（依當前 preview 即時計算，拖曳後自動反映）──
+function fpCellStatsTip(name){
+  if(!name || !_fpPreviewData) return '';
+  var pv    = _fpPreviewData.preview || [];
+  var hdrs2 = _fpPreviewData.headers || [];
+  var holR  = _fpPreviewData.holRows || [];
+  var dates2= _fpPreviewData.dates   || [];
+  var fc    = _fpPreviewData.fairCfg || { weightBcg: 1.5, weightCog: 1.5 };
+  var useW  = !!_fpPreviewData.cogActive;
+  var wkMap3 = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0};
+  var c = { duty:0, dutyH:0, supp:0, deng:0, dengH:0, bcg:0, cog:0 };
+  var clT = [0,0,0,0,0,0,0], clH = [0,0,0,0,0,0,0]; // 門診欄 ci2~8：週二 / 週四 分開
+  pv.forEach(function(row, ri){
+    var hol = !!holR[ri];
+    var ds3 = (dates2[ri] && dates2[ri][0]) || '';
+    var wm3 = ds3.match(/週([一二三四五六日])/);
+    var dow3 = wm3 ? (wkMap3[wm3[1]] !== undefined ? wkMap3[wm3[1]] : -1) : -1;
+    for(var ci=0; ci<row.length; ci++){
+      var v = row[ci];
+      if(!v || v.toString().trim() !== name) continue;
+      if(ci===0){ if(hol) c.dutyH++; else c.duty++; }
+      else if(ci===1){ c.supp++; }
+      else if(ci>=2 && ci<=8){ if(dow3===4) clH[ci-2]++; else clT[ci-2]++; }
+      else if(ci===9){ if(fpLType(ri)==='COG') c.cog++; else c.bcg++; }
+      else if(ci===10){ if(hol) c.dengH++; else c.deng++; }
+    }
+  });
+  var wB = useW ? fc.weightBcg : 1, wC = useW ? fc.weightCog : 1;
+  var clSum = 0;
+  for(var k=0;k<7;k++) clSum += clT[k]+clH[k];
+  var fair = Math.round((clSum + c.bcg*wB + c.cog*wC)*10)/10;
+  var L = ['📊 '+name+'　本月明細'];
+  var isNurse = ((_fpPreviewData.clinicStaff||[]).indexOf(name)!==-1) || clSum>0 || c.bcg>0 || c.cog>0;
+  if(isNurse){
+    // 門診崗位：週二/週四分開（週四的預登1＝癌篩掛號）
+    var hDiag2=hdrs2[2]||'門診', hReg2=hdrs2[3]||'掛號', hFront2=hdrs2[4]||'前台',
+        hPre1b=hdrs2[5]||'預登1', hPre2b=hdrs2[6]||'預登2注', hJab1b=hdrs2[7]||'注射1', hJab2b=hdrs2[8]||'注射2';
+    var items = [
+      hDiag2+'(二) '+clT[0],  hDiag2+'(四) '+clH[0],
+      hReg2+' '+(clT[1]+clH[1]), hFront2+' '+(clT[2]+clH[2]),
+      hPre1b+'(二) '+clT[3],  '癌篩掛號 '+clH[3],
+      hPre2b+'(二) '+clT[4],  '機動 '+clH[4],
+      hJab1b+'(二) '+clT[5],  hJab1b+'(四) '+clH[5],
+      hJab2b+' '+(clT[6]+clH[6])
+    ];
+    for(var j=0;j<items.length;j+=2){ L.push(items.slice(j,j+2).join('、')); }
+    // 資格關卡一律顯示：有受訓＝次數（0也顯示），無受訓＝標示
+    var inBcg = (_fpPreviewData.bcgStaff||[]).indexOf(name)!==-1;
+    var inCog = (_fpPreviewData.cogStaff||[]).indexOf(name)!==-1;
+    L.push('卡介苗 ' + (inBcg ? c.bcg+'次'+((useW&&c.bcg)?'（'+(Math.round(c.bcg*wB*10)/10)+'分）':'') : '無受訓'));
+    L.push('高齡認知 ' + (inCog ? c.cog+'次'+((useW&&c.cog)?'（'+(Math.round(c.cog*wC*10)/10)+'分）':'') : '無受訓'));
+    L.push('門診類公平分 '+fair);
+  }
+  var other = [];
+  if(c.duty+c.dutyH) other.push('值班 '+(c.duty+c.dutyH)+'（平'+c.duty+'/假'+c.dutyH+'）');
+  if(c.supp) other.push('支援 '+c.supp);
+  if(c.deng+c.dengH) other.push('停班2線 '+(c.deng+c.dengH)+'（平'+c.deng+'/假'+c.dengH+'）');
+  if(other.length) L.push(other.join('、'));
+  return L.join('
+');
+}
+
+function attachFpCellTips(){
+  var tbl = el('fpTable');
+  if(!tbl) return;
+  var handler = function(e){
+    var td = e.target.closest ? e.target.closest('td') : null;
+    if(!td || !tbl.contains(td)) return;
+    var tr = td.parentNode;
+    if(!tr || !tr.parentNode || tr.parentNode.tagName !== 'TBODY') return;
+    var ci = td.cellIndex - 1;
+    if(ci < 0 || ci > 10) return;  // 日期欄略過
+    var rowIdx = tr.sectionRowIndex;
+    // 保留原有浮標（換班紀錄/系統挪移），統計附加在下方
+    if(td._baseTip === undefined) td._baseTip = td.getAttribute('data-tip') || '';
+    var name = getCellName(rowIdx, ci);
+    var tip  = name ? fpCellStatsTip(name) : '';
+    var full = td._baseTip ? (td._baseTip + (tip ? '
+─────
+' + tip : '')) : tip;
+    if(full) td.setAttribute('data-tip', full);
+    else td.removeAttribute('data-tip');
+  };
+  tbl.onmouseover  = handler;  // 桌機 hover（在 document floatTip 監聽前先算好 data-tip）
+  tbl.ontouchstart = handler;  // 觸控點按同樣先算好
 }
 
 function makeFpTableAddable(){
