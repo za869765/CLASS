@@ -3584,7 +3584,15 @@ function fpLType(rowIdx){
   return lts[rowIdx] || '';
 }
 
-// ── ver4.9：格子浮標＝該人本月各關卡明細（依當前 preview 即時計算，拖曳後自動反映）──
+// ver4.9：浮標數字上色——0=藍（比理想1少）、≥2=紅（比理想1多）、1=白（理想）
+// 排班理想=每人每類剛好1次，現實排不到，用顏色提示排班者往哪調
+function fpNum(n){
+  if (n === 0) return '<b style="color:#4fc3f7">0</b>';
+  if (n >= 2)  return '<b style="color:#ff8a80">'+n+'</b>';
+  return String(n);
+}
+
+// ── ver4.9：格子浮標＝該人本月各關卡明細（依當前 preview 即時計算，拖曳後自動反映；輸出含顏色 HTML）──
 function fpCellStatsTip(name){
   if(!name || !_fpPreviewData) return '';
   var pv    = _fpPreviewData.preview || [];
@@ -3615,7 +3623,7 @@ function fpCellStatsTip(name){
   var clSum = 0;
   for(var k=0;k<7;k++) clSum += clT[k]+clH[k];
   var fair = Math.round((clSum + c.bcg*wB + c.cog*wC)*10)/10;
-  var L = ['📊 '+name+'　本月明細'];
+  var L = ['📊 '+x(name)+'　本月明細'];
   var isNurse = ((_fpPreviewData.clinicStaff||[]).indexOf(name)!==-1) || clSum>0 || c.bcg>0 || c.cog>0;
   if(isNurse){
     // 門診崗位：週二/週四分開（週四的預登1＝癌篩掛號）
@@ -3623,20 +3631,20 @@ function fpCellStatsTip(name){
         hPre1b=hdrs2[5]||'預登1', hPre2b=hdrs2[6]||'預登2注', hJab1b=hdrs2[7]||'注射1', hJab2b=hdrs2[8]||'注射2';
     // ver4.9：兩項之間用「／」分隔；注射依業務配對——兒童預防注射1跟2同行（週二）、成人疫苗注射獨立行（週四）
     var items = [
-      hDiag2+'(二) '+clT[0],  hDiag2+'(四) '+clH[0],
-      hReg2+' '+(clT[1]+clH[1]), hFront2+' '+(clT[2]+clH[2]),
-      hPre1b+'(二) '+clT[3],  '癌篩掛號 '+clH[3],
-      hPre2b+'(二) '+clT[4],  '機動 '+clH[4],
-      '兒童預防注射1 '+clT[5], '兒童預防注射2 '+clT[6],
-      '成人疫苗注射1 '+clH[5]
+      x(hDiag2)+'(二) '+fpNum(clT[0]),  x(hDiag2)+'(四) '+fpNum(clH[0]),
+      x(hReg2)+' '+fpNum(clT[1]+clH[1]), x(hFront2)+' '+fpNum(clT[2]+clH[2]),
+      x(hPre1b)+'(二) '+fpNum(clT[3]),  '癌篩掛號 '+fpNum(clH[3]),
+      x(hPre2b)+'(二) '+fpNum(clT[4]),  '機動 '+fpNum(clH[4]),
+      '兒童預防注射1 '+fpNum(clT[5]), '兒童預防注射2 '+fpNum(clT[6]),
+      '成人疫苗注射1 '+fpNum(clH[5])
     ];
-    if(clH[6] > 0) items.push('成人疫苗注射2 '+clH[6]);
+    if(clH[6] > 0) items.push('成人疫苗注射2 '+fpNum(clH[6]));
     for(var j=0;j<items.length;j+=2){ L.push(items.slice(j,j+2).join(' ／ ')); }
     // 資格關卡一律顯示：有受訓＝次數（0也顯示），無受訓＝標示
     var inBcg = (_fpPreviewData.bcgStaff||[]).indexOf(name)!==-1;
     var inCog = (_fpPreviewData.cogStaff||[]).indexOf(name)!==-1;
-    L.push('卡介苗 ' + (inBcg ? c.bcg+'次'+((useW&&c.bcg)?'（'+(Math.round(c.bcg*wB*10)/10)+'分）':'') : '無受訓'));
-    L.push('高齡認知 ' + (inCog ? c.cog+'次'+((useW&&c.cog)?'（'+(Math.round(c.cog*wC*10)/10)+'分）':'') : '無受訓'));
+    L.push('卡介苗 ' + (inBcg ? fpNum(c.bcg)+'次'+((useW&&c.bcg)?'（'+(Math.round(c.bcg*wB*10)/10)+'分）':'') : '<b style="color:#4fc3f7">無受訓</b>'));
+    L.push('高齡認知 ' + (inCog ? fpNum(c.cog)+'次'+((useW&&c.cog)?'（'+(Math.round(c.cog*wC*10)/10)+'分）':'') : '<b style="color:#4fc3f7">無受訓</b>'));
     L.push('門診類公平分 '+fair);
   }
   var other = [];
@@ -3661,10 +3669,18 @@ function attachFpCellTips(){
     // 保留原有浮標（換班紀錄/系統挪移），統計附加在下方
     if(td._baseTip === undefined) td._baseTip = td.getAttribute('data-tip') || '';
     var name = getCellName(rowIdx, ci);
-    var tip  = name ? fpCellStatsTip(name) : '';
-    var full = td._baseTip ? (td._baseTip + (tip ? '\n─────\n' + tip : '')) : tip;
-    if(full) td.setAttribute('data-tip', full);
-    else td.removeAttribute('data-tip');
+    var tipHtml  = name ? fpCellStatsTip(name) : '';   // 含顏色 span 的 HTML
+    var tipPlain = tipHtml.replace(/<[^>]*>/g, '');    // 純文字後備
+    var basePlain = td._baseTip || '';
+    var fullPlain = basePlain ? (basePlain + (tipPlain ? '\n─────\n' + tipPlain : '')) : tipPlain;
+    var fullHtml  = basePlain ? (x(basePlain) + (tipHtml ? '\n─────\n' + tipHtml : '')) : tipHtml;
+    if(fullPlain){
+      td.setAttribute('data-tip', fullPlain);
+      td.setAttribute('data-tip-html', fullHtml);  // floatTip 優先用 HTML（僅系統自產、已跳脫）
+    } else {
+      td.removeAttribute('data-tip');
+      td.removeAttribute('data-tip-html');
+    }
   };
   tbl.onmouseover  = handler;  // 桌機 hover（在 document floatTip 監聽前先算好 data-tip）
   tbl.ontouchstart = handler;  // 觸控點按同樣先算好
@@ -6480,9 +6496,11 @@ function buildMonthPreviewHtml(r){
   document.body.appendChild(tip);
   // ★ ver4.8：選擇器由 td[data-tip] 放寬為 [data-tip]（span/button 也能顯示浮標說明）
   document.addEventListener('mouseover', function(e){
-    var td = e.target.closest('[data-tip]');
+    var td = e.target.closest('[data-tip],[data-tip-html]');
     if(!td) return;
-    tip.textContent = td.dataset.tip;
+    // ver4.9：data-tip-html 優先（僅系統自產統計浮標使用、內容已跳脫），其餘照舊純文字防注入
+    if(td.dataset.tipHtml) tip.innerHTML = td.dataset.tipHtml;
+    else tip.textContent = td.dataset.tip || '';
     tip.style.display = 'block';
     place(e);
   });
@@ -6490,14 +6508,15 @@ function buildMonthPreviewHtml(r){
     if(tip.style.display==='block') place(e);
   });
   document.addEventListener('mouseout', function(e){
-    var td = e.target.closest('[data-tip]');
+    var td = e.target.closest('[data-tip],[data-tip-html]');
     if(td && !td.contains(e.relatedTarget)) tip.style.display='none';
   });
   // ★ ver4.8：觸控裝置支援 — 點按帶 data-tip 的元素顯示浮標 2.5 秒（原本手機完全看不到換班紀錄）
   document.addEventListener('touchstart', function(e){
-    var t = e.target.closest('[data-tip]');
+    var t = e.target.closest('[data-tip],[data-tip-html]');
     if(!t){ tip.style.display='none'; return; }
-    tip.textContent = t.dataset.tip;
+    if(t.dataset.tipHtml) tip.innerHTML = t.dataset.tipHtml;
+    else tip.textContent = t.dataset.tip || '';
     tip.style.display = 'block';
     var r = t.getBoundingClientRect();
     var tw = tip.offsetWidth||180, th = tip.offsetHeight||60;
