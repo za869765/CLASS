@@ -3408,12 +3408,12 @@ function buildFpStats(){
     {key:hReg,         label:'掛號',        title:'掛號（週四）',     bg:'#dcedc8'},
     {key:hFront,       label:'前台',        title:'前台（週四）',     bg:'#e0f7fa'},
     {key:hPre1+'_二',  label:'預登1(二)',   title:'預登1（週二）',    bg:'#b3e5fc'},
-    {key:hPre1+'_四',  label:'癌篩掛號',    title:'癌篩掛號（週四，欄位=預登1）', bg:'#81d4fa'},
+    {key:hPre1+'_四',  label:'預登1(四)',   title:'週四＝癌篩掛號',   bg:'#81d4fa'},
     {key:hPre2+'_二',  label:'預登2(二)',   title:'預登2注（週二）',  bg:'#b2ebf2'},
-    {key:hPre2+'_四',  label:'機動',        title:'機動（週四，癌篩協助或協助打針，欄位=預登2注）', bg:'#80deea'},
-    {key:hJab1+'_二',  label:'注射1(二)',   title:'注射1（週二）',    bg:'#fff9c4'},
-    {key:hJab1+'_四',  label:'注射1(四)',   title:'注射1（週四）',    bg:'#fff176'},
-    {key:hJab2,        label:'注射2',       title:'注射2（週二）',    bg:'#ffe082'},
+    {key:hPre2+'_四',  label:'預登2(四)',   title:'週四＝機動（癌篩協助或協助打針）', bg:'#80deea'},
+    {key:hJab1+'_二',  label:'注射1(二)',   title:'週二＝兒童預防注射1', bg:'#fff9c4'},
+    {key:hJab1+'_四',  label:'注射1(四)',   title:'週四＝成人疫苗注射1', bg:'#fff176'},
+    {key:hJab2,        label:'注射2',       title:'週二＝兒童預防注射2', bg:'#ffe082'},
     // ver4.9 雙帳本：資格關卡 1 次顯示為加權分（生效月才加權，不追溯）
     {key:'卡介苗',     label:'卡介苗',      title:'卡介苗（首週二）'+(_fpUseW?'，1次計'+_fpFc.weightBcg+'分':''), bg:'#fce4ec', w:(_fpUseW?_fpFc.weightBcg:1)},
     {key:'高齡認知',   label:'高齡認知',    title:'高齡認知（其餘週二）'+(_fpUseW?'，1次計'+_fpFc.weightCog+'分':''), bg:'#b2dfdb', w:(_fpUseW?_fpFc.weightCog:1)}
@@ -3566,8 +3566,8 @@ function fpCellStatsTip(name){
       hReg2+' '+(clT[1]+clH[1]), hFront2+' '+(clT[2]+clH[2]),
       hPre1b+'(二) '+clT[3],  '癌篩掛號 '+clH[3],
       hPre2b+'(二) '+clT[4],  '機動 '+clH[4],
-      hJab1b+'(二) '+clT[5],  hJab1b+'(四) '+clH[5],
-      hJab2b+' '+(clT[6]+clH[6])
+      '兒童預防注射1 '+clT[5], '成人疫苗注射1 '+clH[5],
+      '兒童預防注射2 '+(clT[6]+clH[6])
     ];
     for(var j=0;j<items.length;j+=2){ L.push(items.slice(j,j+2).join('、')); }
     // 資格關卡一律顯示：有受訓＝次數（0也顯示），無受訓＝標示
@@ -3582,8 +3582,7 @@ function fpCellStatsTip(name){
   if(c.supp) other.push('支援 '+c.supp);
   if(c.deng+c.dengH) other.push('停班2線 '+(c.deng+c.dengH)+'（平'+c.deng+'/假'+c.dengH+'）');
   if(other.length) L.push(other.join('、'));
-  return L.join('
-');
+  return L.join('\n');
 }
 
 function attachFpCellTips(){
@@ -3601,9 +3600,7 @@ function attachFpCellTips(){
     if(td._baseTip === undefined) td._baseTip = td.getAttribute('data-tip') || '';
     var name = getCellName(rowIdx, ci);
     var tip  = name ? fpCellStatsTip(name) : '';
-    var full = td._baseTip ? (td._baseTip + (tip ? '
-─────
-' + tip : '')) : tip;
+    var full = td._baseTip ? (td._baseTip + (tip ? '\n─────\n' + tip : '')) : tip;
     if(full) td.setAttribute('data-tip', full);
     else td.removeAttribute('data-tip');
   };

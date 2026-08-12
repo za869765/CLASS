@@ -204,14 +204,25 @@ function lDisplayName(dateObj) {
   return '卡介苗/高齡認知';
 }
 
-// ver4.9：週四業務別名（欄位共用、名稱正名；名單/計數不變）
-// H欄 預登1：週四＝癌篩掛號　I欄 預登2注：週四＝機動（癌篩協助或協助打針）
-function thursdayAliasName(ci0to10, dateObj, fallbackName) {
+// ver4.9：日別業務正名（僅浮標/LINE/Email/換班視窗顯示用；表格標題與日誌保持短名）
+// H欄 預登1：週四＝癌篩掛號
+// I欄 預登2注：週四＝機動（癌篩協助或協助打針）
+// J欄 注射1：週二＝兒童預防注射1、週四＝成人疫苗注射1
+// K欄 注射2：週二＝兒童預防注射2、週四＝成人疫苗注射2（目前週四不排，名稱備用）
+function dayAliasName(ci0to10, dateObj, fallbackName) {
   if (!dateObj) return fallbackName;
   const d = new Date(dateObj);
-  if (d.getDay() !== 4 || isHoliday(d)) return fallbackName;
-  if (ci0to10 === 5) return '癌篩掛號';
-  if (ci0to10 === 6) return '機動';
+  if (isHoliday(d)) return fallbackName;
+  const dow = d.getDay();
+  if (dow === 4) {
+    if (ci0to10 === 5) return '癌篩掛號';
+    if (ci0to10 === 6) return '機動';
+    if (ci0to10 === 7) return '成人疫苗注射1';
+    if (ci0to10 === 8) return '成人疫苗注射2';
+  } else if (dow === 2) {
+    if (ci0to10 === 7) return '兒童預防注射1';
+    if (ci0to10 === 8) return '兒童預防注射2';
+  }
   return fallbackName;
 }
 
@@ -486,8 +497,8 @@ function getDaySchedule(spreadsheet, dateObj, timezone) {
         const lt = getLTypeForDate(dateObj);
         if (lt === 'COG') shiftName = '高齡認知';
         else if (lt === 'BCG') shiftName = '卡介苗';
-      } else if (ci === 5 || ci === 6) {
-        shiftName = thursdayAliasName(ci, dateObj, shiftName);
+      } else if (ci >= 5 && ci <= 8) {
+        shiftName = dayAliasName(ci, dateObj, shiftName);
       }
       duties.push({ shift: shiftName, person: val.toString().trim() });
     }
@@ -868,13 +879,14 @@ function getShiftOptions(column, dateStr, sheetName) {
   const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const columnLetter = String.fromCharCode(64 + column);
 
-  // ── H/I 欄週四：名稱正名（癌篩掛號/機動），選人池不變 ──
-  if ((column === 8 || column === 9) && dateStr) {
+  // ── H~K 欄：日別正名顯示（癌篩掛號/機動/兒童預防注射/成人疫苗注射），選人池不變 ──
+  if (column >= 8 && column <= 11 && dateStr) {
     const dObjHI = parseDateFromSheet(dateStr.toString().split(' ')[0], sheetName || '');
-    if (dObjHI && dObjHI.getDay() === 4 && !isHoliday(dObjHI)) {
+    const aliasHI = dObjHI ? dayAliasName(column - 3, dObjHI, '') : '';
+    if (aliasHI) {
       const rangeHI = GLOBAL_CONFIG.SHIFT_OPTIONS[String.fromCharCode(64 + column)];
       const optsHI = rangeHI ? sheet.getRange(rangeHI).getValues().flat().filter(o => o) : [];
-      return { options: optsHI, selectType: 'SC', displayName: column === 8 ? '癌篩掛號' : '機動' };
+      return { options: optsHI, selectType: 'SC', displayName: aliasHI };
     }
   }
 
@@ -1624,8 +1636,8 @@ function getYearlyClinicStats() {
     const WD_HEADERS = [
       (h[0]||'門診')+'(二)',  (h[0]||'門診')+'(四)',
       h[1]||'掛號',            h[2]||'前台',
-      (h[3]||'預登1')+'(二)', '癌篩掛號',   // 週四的預登1＝癌篩掛號（ver4.9 正名）
-      (h[4]||'預登2注')+'(二)', '機動',      // 週四的預登2注＝機動（癌篩協助或協助打針）
+      (h[3]||'預登1')+'(二)', (h[3]||'預登1')+'(四)',
+      (h[4]||'預登2注')+'(二)',(h[4]||'預登2注')+'(四)',
       (h[5]||'注射1')+'(二)', (h[5]||'注射1')+'(四)',
       h[6]||'注射2',           '卡介苗',                '高齡認知'
     ];
@@ -4084,9 +4096,9 @@ function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
           const lt = getLTypeForDate(rowDObj);
           if (lt === 'COG') hdr = '高齡認知';
           else if (lt === 'BCG') hdr = '卡介苗';
-        } else if (ci === 7 || ci === 8) {
-          // H欄(7)=預登1、I欄(8)=預登2注：週四正名 癌篩掛號/機動
-          hdr = thursdayAliasName(ci - 2, rowDObj, hdr);
+        } else if (ci >= 7 && ci <= 10) {
+          // H(7)預登1/I(8)預登2注/J(9)注射1/K(10)注射2：日別正名
+          hdr = dayAliasName(ci - 2, rowDObj, hdr);
         }
         shifts.push({ header: hdr, value: val });
       }
@@ -4113,6 +4125,10 @@ const LINE_SHIFT_STYLE = {
   '高齡認知':  { icon: '🚗', color: '#16A085' },
   '癌篩掛號':  { icon: '🎗️', color: '#AD1457' },
   '機動':      { icon: '🤝', color: '#00838F' },
+  '兒童預防注射1': { icon: '💉', color: '#F39C12' },
+  '兒童預防注射2': { icon: '💉', color: '#F39C12' },
+  '成人疫苗注射1': { icon: '💉', color: '#E67E22' },
+  '成人疫苗注射2': { icon: '💉', color: '#E67E22' },
   '卡介苗/高齡認知': { icon: '🩹', color: '#E74C3C' },
   '登革熱二線':{ icon: '🦟', color: '#8E44AD' }
 };
