@@ -3692,13 +3692,14 @@ function attachFpCellTips(){
       td.removeAttribute('data-tip');
       td.removeAttribute('data-tip-html');
     }
-    // ver4.9：同名格閃爍標示——指著人名時，他本月其他班的格子一起亮
+    // ver4.9：同名格閃爍標示——僅限護理師門診類（ci 2~9 門診~卡介苗/高齡認知），
+    //         值班/支援/停班2線不閃（次數已在浮標文字內顯示）
     fpClearHl();
     if(name && _fpPreviewData){
       var pvH = _fpPreviewData.preview || [];
       for(var ri2 = 0; ri2 < pvH.length; ri2++){
         var rowH = pvH[ri2] || [];
-        for(var ci2 = 0; ci2 <= 10; ci2++){
+        for(var ci2 = 2; ci2 <= 9; ci2++){
           if(ri2 === rowIdx && ci2 === ci) continue;  // 自己這格不閃
           var v2 = rowH[ci2];
           if(v2 && v2.toString().trim() === name){
