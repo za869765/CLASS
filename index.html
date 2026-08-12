@@ -3646,6 +3646,14 @@ function fpCellStatsTip(name){
     L.push('卡介苗 ' + (inBcg ? fpNum(c.bcg)+'次'+((useW&&c.bcg)?'（'+(Math.round(c.bcg*wB*10)/10)+'分）':'') : '<b style="color:#4fc3f7">無受訓</b>'));
     L.push('高齡認知 ' + (inCog ? fpNum(c.cog)+'次'+((useW&&c.cog)?'（'+(Math.round(c.cog*wC*10)/10)+'分）':'') : '<b style="color:#4fc3f7">無受訓</b>'));
     L.push('門診類公平分 '+fair);
+    // ver4.9：類別集中橘字提醒（僅提醒不阻擋）——注射類(預登2注+注射1+注射2)或掛號類(掛號+前台+預登1含癌篩掛號)佔本月門診班>60%
+    // cl 索引：0=門診(中性) 1=掛號 2=前台 3=預登1 4=預登2注 5=注射1 6=注射2
+    if(clSum >= 3){
+      var injCnt = (clT[4]+clH[4]) + (clT[5]+clH[5]) + (clT[6]+clH[6]);
+      var regCnt = (clT[1]+clH[1]) + (clT[2]+clH[2]) + (clT[3]+clH[3]);
+      if(injCnt / clSum > 0.6) L.push('<b style="color:#ffb74d">⚠️ 注射類佔 '+Math.round(injCnt/clSum*100)+'%（'+injCnt+'/'+clSum+'）偏集中</b>');
+      if(regCnt / clSum > 0.6) L.push('<b style="color:#ffb74d">⚠️ 掛號類佔 '+Math.round(regCnt/clSum*100)+'%（'+regCnt+'/'+clSum+'）偏集中</b>');
+    }
   }
   var other = [];
   if(c.duty+c.dutyH) other.push('值班 '+(c.duty+c.dutyH)+'（平'+c.duty+'/假'+c.dutyH+'）');
