@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver4.9 - 高齡換照關卡（L欄與卡介苗時間共用）＋雙帳本資格加權＋滾動月公平基準
+// ver4.9 - 高齡認知關卡（L欄與卡介苗時間共用）＋雙帳本資格加權＋滾動月公平基準
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -46,7 +46,7 @@ const GLOBAL_CONFIG = {
     'I': 'K1:K8',   // 預登2
     'J': 'K1:K8',   // 預注1
     'K': 'K1:K8',   // 預注2
-    'L': 'Q1:Q11',   // 卡介/換照：首週二=卡介苗(Q欄)、其餘週二=高齡換照(COG_STAFF_RANGE)
+    'L': 'Q1:Q11',   // 卡介苗/高齡認知：首週二=卡介苗(Q欄)、其餘週二=高齡認知(COG_STAFF_RANGE)
     'M': 'B1:B11'   // 登革熱二線：B欄順序（登革熱專屬輪序）
   },
   SELECT_TYPE: {
@@ -54,11 +54,11 @@ const GLOBAL_CONFIG = {
     'I':'SC','J':'SC','K':'SC','L':'SC','M':'SC'
   },
   SHIFT_HEADERS: [
-    "值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介/換照","停班2線"
+    "值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介苗/高齡認知","停班2線"
   ],
-  // ── 高齡換照／資格加權設定（ver4.9）─────────────────────────────
-  // G1:G8 = 高齡換照候選護理師名單（5人資格池）
-  // F1 = 卡介苗係數（預設1.5）  F2 = 高齡換照係數（預設1.5）
+  // ── 高齡認知／資格加權設定（ver4.9）─────────────────────────────
+  // G1:G8 = 高齡認知候選護理師名單（5人資格池）
+  // F1 = 卡介苗係數（預設1.5）  F2 = 高齡認知係數（預設1.5）
   // F3 = 公平基準滾動月數（預設3）
   COG_STAFF_RANGE:    'G1:G8',
   QUAL_WEIGHT_BCG:    'F1',
@@ -163,7 +163,7 @@ function isThursdayWorkday(dateObj) {
 
 function getFirstTuesdayWorkday(year, month) {
   // ver4.9（Codex review #1）：改掃整個月。原本只掃 1~7 日，若該週二適逢國定假日
-  // 會回傳 -1 → 整月無卡介苗，且生效後所有週二被誤判為高齡換照。
+  // 會回傳 -1 → 整月無卡介苗，且生效後所有週二被誤判為高齡認知。
   // 「每月第一個工作週二」＝當月第一個「週二且非假日」的日子。
   const lastDay = new Date(year, month, 0).getDate();
   for (let day = 1; day <= lastDay; day++) {
@@ -174,8 +174,8 @@ function getFirstTuesdayWorkday(year, month) {
 }
 
 // =============================================
-// ver4.9 高齡換照（L欄與卡介苗時間共用）
-// 規則：每月第一個工作週二=卡介苗(BCG)、其餘工作週二=高齡換照(COG)
+// ver4.9 高齡認知（L欄與卡介苗時間共用）
+// 規則：每月第一個工作週二=卡介苗(BCG)、其餘工作週二=高齡認知(COG)
 // 生效：2026年9月起，不追溯（之前的 L 欄一律視為卡介苗）
 // =============================================
 const COG_EFFECTIVE_YM = 2026 * 100 + 9;   // 202609
@@ -199,12 +199,12 @@ function getLTypeForDate(dateObj) {
 // L 欄顯示名稱（LINE / Email / 換班紀錄 / 自檢共用同一標準）
 function lDisplayName(dateObj) {
   const t = getLTypeForDate(dateObj);
-  if (t === 'COG') return '高齡換照';
+  if (t === 'COG') return '高齡認知';
   if (t === 'BCG') return '卡介苗';
-  return '卡介/換照';
+  return '卡介苗/高齡認知';
 }
 
-// 高齡換照候選名單（班表設定 G1:G8）
+// 高齡認知候選名單（班表設定 G1:G8）
 function getCogStaffNames() {
   try {
     const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
@@ -214,7 +214,7 @@ function getCogStaffNames() {
   } catch(e) { return []; }
 }
 
-// 公平制度設定（F1卡介苗係數 / F2高齡換照係數 / F3滾動月數），空白用預設
+// 公平制度設定（F1卡介苗係數 / F2高齡認知係數 / F3滾動月數），空白用預設
 function getFairnessConfig() {
   const def = { weightBcg: 1.5, weightCog: 1.5, rollingMonths: 3 };
   try {
@@ -470,10 +470,10 @@ function getDaySchedule(spreadsheet, dateObj, timezone) {
   rowData.forEach((val, ci) => {
     if (val && val.toString().trim()) {
       let shiftName = headers[ci] || '';
-      // ver4.9：L欄（ci=9）依日期翻譯為 卡介苗/高齡換照
+      // ver4.9：L欄（ci=9）依日期翻譯為 卡介苗/高齡認知
       if (ci === 9) {
         const lt = getLTypeForDate(dateObj);
-        if (lt === 'COG') shiftName = '高齡換照';
+        if (lt === 'COG') shiftName = '高齡認知';
         else if (lt === 'BCG') shiftName = '卡介苗';
       }
       duties.push({ shift: shiftName, person: val.toString().trim() });
@@ -737,7 +737,7 @@ function getScheduleData(sheetName) {
   } catch(e) {}
 
   // ★ 計算每列是否為假日（供前端 fullPreview 正確標色，含清明等非六日假日）
-  //   ver4.9：同時解析每列日期物件，供 L 欄卡介苗/高齡換照類型判定
+  //   ver4.9：同時解析每列日期物件，供 L 欄卡介苗/高齡認知類型判定
   const rowDates = datesRange.map(row => {
     const rawA = row[0];
     if (!rawA) return null;
@@ -849,7 +849,7 @@ function setReviewStatus(adminPassword, sheetName, status) {
   } catch(e) { return { success: false, message: e.message }; }
 }
 
-// ver4.9：dateStr/sheetName 為選填（L欄需依日期切換 卡介苗Q欄池 / 高齡換照G欄池）
+// ver4.9：dateStr/sheetName 為選填（L欄需依日期切換 卡介苗Q欄池 / 高齡認知G欄池）
 function getShiftOptions(column, dateStr, sheetName) {
   const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const columnLetter = String.fromCharCode(64 + column);
@@ -859,7 +859,7 @@ function getShiftOptions(column, dateStr, sheetName) {
     const dObj = parseDateFromSheet(dateStr.toString().split(' ')[0], sheetName || '');
     const lt = dObj ? getLTypeForDate(dObj) : '';
     if (lt === 'COG') {
-      return { options: getCogStaffNames(), selectType: 'SC', displayName: '高齡換照' };
+      return { options: getCogStaffNames(), selectType: 'SC', displayName: '高齡認知' };
     }
     if (lt === 'BCG') {
       const opts = sheet.getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(o => o);
@@ -894,11 +894,11 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
       //   避免「儲存格已改但回報系統錯誤」的部分寫入誤報
       const headers = sheet.getRange('C1:M1').getValues()[0];
       let shiftType = headers[shiftColumn - 3] || '未知班別';
-      // ver4.9：L欄依日期翻譯為 卡介苗/高齡換照，換班紀錄才不會誤導
+      // ver4.9：L欄依日期翻譯為 卡介苗/高齡認知，換班紀錄才不會誤導
       if (shiftColumn === 12) {
         const dObjL = parseDateFromSheet(date.trim().split(' ')[0], sheetName);
         const ltL = dObjL ? getLTypeForDate(dObjL) : '';
-        if (ltL === 'COG') shiftType = '高齡換照';
+        if (ltL === 'COG') shiftType = '高齡認知';
         else if (ltL === 'BCG') shiftType = '卡介苗';
       }
       sheet.getRange(row, shiftColumn).setValue(newShift);
@@ -1103,9 +1103,9 @@ function getScheduleChanges(sheetName, preloadedHeaders) {
     // 標頭正規化 map（舊日誌「值班人員」→「值班」等）
     const hdrNormMap = {};
     sheetHdrs.forEach(h => { if (h) hdrNormMap[h] = h; });
-    // 常見舊名稱對應（ver4.9：L欄日誌記「卡介苗/高齡換照」，標頭為「卡介/換照」）
+    // 常見舊名稱對應（ver4.9：L欄日誌記「卡介苗/高齡認知」，標頭為「卡介苗/高齡認知」）
     const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援',
-                         '卡介苗':'卡介/換照', '高齡換照':'卡介/換照' };
+                         '卡介苗':'卡介苗/高齡認知', '高齡認知':'卡介苗/高齡認知', '卡介/換照':'卡介苗/高齡認知' };
     Object.keys(LEGACY_HDR).forEach(old => {
       if (!hdrNormMap[old]) hdrNormMap[old] = LEGACY_HDR[old];
     });
@@ -1348,8 +1348,8 @@ function getYearlyClinicStats() {
     // 混合日欄（週二+週四）：idx 0,3,4,5 → 拆成 _二 / _四 兩子欄
     // 週四專屬欄：idx 1,2（掛號/前台）→ 不拆
     // 週二專屬欄：idx 6（注射2）→ 不拆
-    // ver4.9 L欄拆兩欄：卡介苗(首週二)→11、高齡換照(其餘週二)→12
-    // 輸出 13 欄：[門診(二),門診(四),掛號,前台,預登1(二),預登1(四),預登2注(二),預登2注(四),注射1(二),注射1(四),注射2,卡介苗,高齡換照]
+    // ver4.9 L欄拆兩欄：卡介苗(首週二)→11、高齡認知(其餘週二)→12
+    // 輸出 13 欄：[門診(二),門診(四),掛號,前台,預登1(二),預登1(四),預登2注(二),預登2注(四),注射1(二),注射1(四),注射2,卡介苗,高齡認知]
     const MIX_IDX = new Set([0, 3, 4, 5]); // 需要拆分的原始索引
     const wkMap = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0};
 
@@ -1370,7 +1370,7 @@ function getYearlyClinicStats() {
       if (srcIdx === 4) return dow === 2 ? 6 : (dow === 4 ? 7 : 6); // 預登2注
       if (srcIdx === 5) return dow === 2 ? 8 : (dow === 4 ? 9 : 8); // 注射1
       if (srcIdx === 6) return 10;  // 注射2（週二）
-      if (srcIdx === 7) return lType === 'COG' ? 12 : 11;  // 卡介苗 / 高齡換照
+      if (srcIdx === 7) return lType === 'COG' ? 12 : 11;  // 卡介苗 / 高齡認知
       return 0;
     }
 
@@ -1380,7 +1380,7 @@ function getYearlyClinicStats() {
       const lr = sh.getLastRow();
       if (lr < 2) return;
       const maxRow = Math.min(lr, 32);
-      // E到L欄（含卡介/換照）；B 欄星期字串；A 欄日期（ver4.9 L欄類型判定用）
+      // E到L欄（含卡介苗/高齡認知）；B 欄星期字串；A 欄日期（ver4.9 L欄類型判定用）
       const data    = sh.getRange('E2:L' + maxRow).getValues();
       const wkData  = sh.getRange('B2:B' + maxRow).getValues();
       const dtData  = sh.getRange('A2:A' + maxRow).getValues();
@@ -1402,7 +1402,7 @@ function getYearlyClinicStats() {
         const wb  = wkData[ri][0] ? wkData[ri][0].toString() : '';
         const wm  = wb.match(/週([一二三四五六日])/);
         const dow = wm ? (wkMap[wm[1]] !== undefined ? wkMap[wm[1]] : -1) : -1;
-        // 解析日期（L欄卡介苗/高齡換照判定＋原始排班 key）
+        // 解析日期（L欄卡介苗/高齡認知判定＋原始排班 key）
         let pd = null;
         const rawA = dtData[ri][0];
         if (rawA instanceof Date) pd = rawA;
@@ -1595,7 +1595,7 @@ function getYearlyClinicStats() {
 
     const passedMonths = scheduledMonthCount; // 已排班月份數
 
-    // 13 欄標頭（週別分欄後的名稱；ver4.9 L欄拆 卡介苗/高齡換照）
+    // 13 欄標頭（週別分欄後的名稱；ver4.9 L欄拆 卡介苗/高齡認知）
     const h = CLINIC_HEADERS;
     const WD_HEADERS = [
       (h[0]||'門診')+'(二)',  (h[0]||'門診')+'(四)',
@@ -1603,7 +1603,7 @@ function getYearlyClinicStats() {
       (h[3]||'預登1')+'(二)', (h[3]||'預登1')+'(四)',
       (h[4]||'預登2注')+'(二)',(h[4]||'預登2注')+'(四)',
       (h[5]||'注射1')+'(二)', (h[5]||'注射1')+'(四)',
-      h[6]||'注射2',           '卡介苗',                '高齡換照'
+      h[6]||'注射2',           '卡介苗',                '高齡認知'
     ];
 
     // 將 wdCounts 轉為 rows 相同格式供前端使用
@@ -1731,7 +1731,7 @@ function getSystemSettings() {
         });
       }
     }
-    // ver4.9：高齡換照名單（G欄）＋公平制度設定（F欄）
+    // ver4.9：高齡認知名單（G欄）＋公平制度設定（F欄）
     const cogNames = sheet.getRange(GLOBAL_CONFIG.COG_STAFF_RANGE).getValues().flat();
     const fairCfg  = getFairnessConfig();
     return {
@@ -1774,7 +1774,7 @@ function saveSystemSettings(adminPassword, settings) {
     if (settings.bcgNames)    for (let i=0;i<11;i++) sheet.getRange('Q'+(i+1)).setValue(settings.bcgNames[i]||'');
     if (settings.dutyNames)   for (let i=0;i<11;i++) sheet.getRange('E'+(i+1)).setValue(settings.dutyNames[i]||'');
     if (settings.dengueNames) for (let i=0;i<11;i++) sheet.getRange('B'+(i+1)).setValue(settings.dengueNames[i]||'');
-    // ver4.9：高齡換照名單（G1:G8）＋公平制度設定（F1係數卡介苗/F2係數高齡換照/F3滾動月數）
+    // ver4.9：高齡認知名單（G1:G8）＋公平制度設定（F1係數卡介苗/F2係數高齡認知/F3滾動月數）
     if (settings.cogNames) for (let i=0;i<8;i++) sheet.getRange('G'+(i+1)).setValue(settings.cogNames[i]||'');
     if (settings.weightBcg !== undefined && settings.weightBcg !== '') {
       const wb = parseFloat(settings.weightBcg);
@@ -1837,7 +1837,7 @@ function setSuccessor(adminPassword, rowIndex, newStaff) {
     sheet.getRange('Y'+row).setValue('');            // 清離職日
     sheet.getRange('P'+row).setValue(finalPoints);   // 初始點數
 
-    // ── 各候選名單自動將舊名→新名（ver4.9 含高齡換照 G 欄）────────────
+    // ── 各候選名單自動將舊名→新名（ver4.9 含高齡認知 G 欄）────────────
     if (oldName && newStaff.name && oldName !== newStaff.name) {
       ['K1:K8','J1:J3','E1:E11','Q1:Q11','B1:B11','G1:G8'].forEach(function(r) {
         replaceInRange_(sheet, r, oldName, newStaff.name);
@@ -1928,11 +1928,11 @@ function shouldAssignShift(date, colIdx, year, month) {
 
   // 值班/停班2線固定
   if (colIdx === 0 || colIdx === 10) return true;
-  // L欄 卡介/換照：首週二=卡介苗；生效後(2026/9起)其餘工作週二=高齡換照
+  // L欄 卡介苗/高齡認知：首週二=卡介苗；生效後(2026/9起)其餘工作週二=高齡認知
   if (colIdx === 9) {
     if (holiday || dow !== 2) return false;
     if (date.getDate() === getFirstTuesdayWorkday(year, month)) return true;  // 卡介苗日
-    return isCognitiveActive(year, month);  // 其餘週二：生效後排高齡換照
+    return isCognitiveActive(year, month);  // 其餘週二：生效後排高齡認知
   }
   if (holiday) return false;
 
@@ -2066,7 +2066,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const shiftStaffMap = getShiftStaffMap();
     const cols = ['C','D','E','F','G','H','I','J','K','L','M'];
 
-    // ★ ver4.9：公平制度設定＋高齡換照候選名單（G欄）
+    // ★ ver4.9：公平制度設定＋高齡認知候選名單（G欄）
     const fairCfg   = getFairnessConfig();
     const cogNames  = getCogStaffNames();
     const cogActive = isCognitiveActive(year, month);
@@ -2320,7 +2320,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
 
     // ── ver4.9 歷史累積計數：改「滾動近N個月」視窗（預設3，F3可調）────
     // ①視窗內各欄/週別次數：供欄內輪序（sort ④）
-    // ②滾動加權公平分：EK每次+1、卡介苗+Wb、高齡換照+Wc（2026/9起，不追溯），
+    // ②滾動加權公平分：EK每次+1、卡介苗+Wb、高齡認知+Wc（2026/9起，不追溯），
     //   除以視窗內在職月數 → rollingAvgFair（sort ③，取代原「跨年累積總量」，
     //   修掉新人因累積=0被系統性超排的隱性補償）
     // ③一律以「原始排班」計數：用換班日誌反推（buildOriginalScheduleMap），
@@ -2330,7 +2330,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const assignCountThu = {};
     const histFair     = {};   // 視窗內加權公平分累計
     const histMonths   = {};   // 視窗內在職月數
-    const cogHistCount = {};   // 視窗內高齡換照次數（COG 輪序用）
+    const cogHistCount = {};   // 視窗內高齡認知次數（COG 輪序用）
     const rollingAvgFair = {}; // 每在職月平均公平分（sort ③）
     staff.forEach(s => { histFair[s.name]=0; histMonths[s.name]=0; cogHistCount[s.name]=0; rollingAvgFair[s.name]=0; });
 
@@ -2395,7 +2395,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             }
           }
 
-          // ── L欄（ci 9）：卡介苗/高齡換照 加權（2026/9起生效，不追溯）──
+          // ── L欄（ci 9）：卡介苗/高齡認知 加權（2026/9起生效，不追溯）──
           const lCell = row[7] ? row[7].toString().trim() : '';
           const lVal  = origMap[dateStr + '|9'] || lCell;
           if (lVal && histFair.hasOwnProperty(lVal) && ymNum >= COG_EFFECTIVE_YM) {
@@ -2429,7 +2429,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const qCandNames = shiftStaffMap['L'] || [];
     for (let r = 0; r < dateObjByRow.length; r++) {
       const d = dateObjByRow[r];
-      // ver4.9：L欄已與高齡換照共用，pre-pass 只認「卡介苗日」（首個工作週二）
+      // ver4.9：L欄已與高齡認知共用，pre-pass 只認「卡介苗日」（首個工作週二）
       if (!d || getLTypeForDate(d) !== 'BCG') continue;
       // 找到卡介苗日
       bcgDateKey = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
@@ -2488,7 +2488,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     // ── 本月門診次數計數器（用於月內上限）────────────────────────────
     const monthlyClinicCount = {};
     staff.forEach(s => { monthlyClinicCount[s.name] = 0; });
-    // ★ ver4.9：本月資格班計數（高齡換照每人每月上限2次）＋本月資格加權分
+    // ★ ver4.9：本月資格班計數（高齡認知每人每月上限2次）＋本月資格加權分
     //   月內公平分數 = monthlyClinicCount + monthlyQualScore（雙帳本：一般班1分、資格班W分）
     const monthlyCogCount  = {};
     const monthlyQualScore = {};
@@ -2526,7 +2526,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           if (!val) continue;
           if (ci === 9) {
             bcgByDate[dk] = val;
-            // ver4.9：還原 L 欄資格班月計數與加權分（依日期判斷卡介苗/高齡換照）
+            // ver4.9：還原 L 欄資格班月計數與加權分（依日期判斷卡介苗/高齡認知）
             const lt9 = getLTypeForDate(d);
             if (lt9 === 'COG') {
               if (monthlyCogCount.hasOwnProperty(val))  monthlyCogCount[val]++;
@@ -2661,12 +2661,12 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           kkPtr = nextPtr;
 
         // ────────────────────────────────────────────────────────────
-        // 卡介/換照(9)：首週二=卡介苗(Q欄嚴格輪序)、其餘週二=高齡換照(G欄資格池)
+        // 卡介苗/高齡認知(9)：首週二=卡介苗(Q欄嚴格輪序)、其餘週二=高齡認知(G欄資格池)
         // ────────────────────────────────────────────────────────────
         } else if (ci === 9) {
           const lType = getLTypeForDate(d);
           if (lType === 'COG') {
-            // ── 高齡換照：G欄5人資格池，獨立輪序＋雙帳本公平分 ──
+            // ── 高齡認知：G欄5人資格池，獨立輪序＋雙帳本公平分 ──
             const cogPool = cogNames
               .map((name, cogIdx) => {
                 const s2 = staff.find(x => x.name === name);
@@ -2681,14 +2681,14 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             const cogCapped = cogPool.filter(p => (monthlyCogCount[p.name]||0) < 2);
             const cogEp = cogCapped.length > 0 ? cogCapped : cogPool;
             cogEp.sort((a, b) => {
-              // ① 本月高齡換照次數少者優先
+              // ① 本月高齡認知次數少者優先
               const ma = monthlyCogCount[a.name]||0, mb = monthlyCogCount[b.name]||0;
               if (ma !== mb) return ma - mb;
               // ② 本月公平分數少者優先（一般班1分＋資格班W分）
               const fa = (monthlyClinicCount[a.name]||0) + (monthlyQualScore[a.name]||0);
               const fb = (monthlyClinicCount[b.name]||0) + (monthlyQualScore[b.name]||0);
               if (fa !== fb) return fa - fb;
-              // ③ 滾動視窗高齡換照次數少者優先（跨月輪序）
+              // ③ 滾動視窗高齡認知次數少者優先（跨月輪序）
               const ha = cogHistCount[a.name]||0, hb = cogHistCount[b.name]||0;
               if (ha !== hb) return ha - hb;
               // ④ 滾動平均公平分少者優先
@@ -2803,7 +2803,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             if (mca !== mcb) return mca - mcb;
 
             // ② 月內公平分數少者優先（ver4.9 雙帳本：一般班1分＋資格班W分）
-            //   資格者站了卡介苗/高齡換照 → 分數已計入 → 自動少排一般關卡（受訓獎勵）
+            //   資格者站了卡介苗/高齡認知 → 分數已計入 → 自動少排一般關卡（受訓獎勵）
             const mthA = (monthlyClinicCount[a.name] || 0) + (monthlyQualScore[a.name] || 0);
             const mthB = (monthlyClinicCount[b.name] || 0) + (monthlyQualScore[b.name] || 0);
             if (Math.abs(mthA - mthB) > 1e-9) return mthA - mthB;
@@ -3044,11 +3044,11 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       sheet.getRange('A2:A32').setNumberFormat('@');
       sheet.getRange('C2:M32').setValues(result);
 
-      // ★ ver4.9：高齡換照生效後，L1 標題自動更新為「卡介/換照」（舊表可能仍是「卡介苗」）
+      // ★ ver4.9：高齡認知生效後，L1 標題自動更新為「卡介苗/高齡認知」（舊表可能仍是「卡介苗」）
       if (cogActive) {
         try {
           const l1 = (sheet.getRange('L1').getValue() || '').toString().trim();
-          if (l1 === '卡介苗') sheet.getRange('L1').setValue('卡介/換照');
+          if (l1 === '卡介苗' || l1 === '卡介/換照') sheet.getRange('L1').setValue('卡介苗/高齡認知');
         } catch(e) {}
       }
 
@@ -3095,13 +3095,13 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       });
     }
 
-    // ver4.9：成功訊息加高齡換照資訊
+    // ver4.9：成功訊息加高齡認知資訊
     let cogMsg = '';
     if (cogActive) {
       const cogDays = dateObjByRow.filter(d => d && getLTypeForDate(d) === 'COG').length;
       cogMsg = cogNames.length === 0
-        ? '，⚠️ 高齡換照名單未設定（班表設定 G1:G8）'
-        : `，高齡換照：${cogDays} 班`;
+        ? '，⚠️ 高齡認知名單未設定（班表設定 G1:G8）'
+        : `，高齡認知：${cogDays} 班`;
     }
     const successMsg = `${sheetName} 排班完成！（${year}年${month}月，共 ${result.length} 天，卡介苗：${bcgPersonThisMonth||'未定'}${cogMsg}）`;
     writeOpLog('自動排班', successMsg);
@@ -4052,12 +4052,12 @@ function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
         const val = row[ci] ? row[ci].toString().trim() : '';
         if (!val) continue;
         let hdr = headers[ci];
-        // ver4.9：L欄（試算表第12欄=index 11）依日期翻譯 卡介苗/高齡換照
+        // ver4.9：L欄（試算表第12欄=index 11）依日期翻譯 卡介苗/高齡認知
         if (ci === 11) {
           const dObj = row[0] instanceof Date ? row[0] : parseDateFromSheet(dateStr, sName);
           if (dObj) {
             const lt = getLTypeForDate(dObj);
-            if (lt === 'COG') hdr = '高齡換照';
+            if (lt === 'COG') hdr = '高齡認知';
             else if (lt === 'BCG') hdr = '卡介苗';
           }
         }
@@ -4083,8 +4083,8 @@ const LINE_SHIFT_STYLE = {
   '預注1':     { icon: '💉', color: '#F39C12' },
   '預注2':     { icon: '💉', color: '#F39C12' },
   '卡介苗':    { icon: '🩹', color: '#E74C3C' },
-  '高齡換照':  { icon: '🚗', color: '#16A085' },
-  '卡介/換照': { icon: '🩹', color: '#E74C3C' },
+  '高齡認知':  { icon: '🚗', color: '#16A085' },
+  '卡介苗/高齡認知': { icon: '🩹', color: '#E74C3C' },
   '登革熱二線':{ icon: '🦟', color: '#8E44AD' }
 };
 
@@ -4979,7 +4979,7 @@ function buildOriginalScheduleMap(prevSheetName) {
     // 新 header 為「值班/停班2線/支援」。原本只用 hdrs.indexOf 直接比對拿不到，
     // origMap 缺值 → autoValidateSchedule Check 1 跨月輪序誤判。
     const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援',
-                         '卡介苗':'卡介/換照', '高齡換照':'卡介/換照' };
+                         '卡介苗':'卡介苗/高齡認知', '高齡認知':'卡介苗/高齡認知', '卡介/換照':'卡介苗/高齡認知' };
     const resolveHdrIdx = (name) => {
       let ci = hdrs.indexOf(name);
       if (ci !== -1) return ci;
@@ -5068,7 +5068,7 @@ function autoValidateSchedule(sheetName) {
         duty: (r[2] || '').toString().trim(),   // C欄 值班
         kk:   (r[3] || '').toString().trim(),   // D欄 協助掛號
         deng: (r[12]|| '').toString().trim(),   // M欄 停班2線
-        lVal: (r[11]|| '').toString().trim(),   // L欄 卡介/換照（ver4.9）
+        lVal: (r[11]|| '').toString().trim(),   // L欄 卡介苗/高齡認知（ver4.9）
         lType: getLTypeForDate(d),              // 'BCG'|'COG'|''
         row:  r
       };
@@ -5219,7 +5219,7 @@ function autoValidateSchedule(sheetName) {
     });
 
     // ★ ver4.9：生效後（2026/9起）門診公平度改用「加權公平分數」
-    //   L欄資格班計入：卡介苗×Wb、高齡換照×Wc（雙帳本制，與排班引擎同基準）
+    //   L欄資格班計入：卡介苗×Wb、高齡認知×Wc（雙帳本制，與排班引擎同基準）
     const cogActiveV = isCognitiveActive(year, month);
     const fairCfgV   = getFairnessConfig();
     if (cogActiveV) {
@@ -5266,35 +5266,35 @@ function autoValidateSchedule(sheetName) {
     fairCheckT('停班2線假日', dengHol,    2);
 
     // ════════════════════════════════════════════════════════════════
-    // 檢查 5（ver4.9）：卡介/換照欄位規則
-    //   首週二=卡介苗（Q欄3人池）、其餘週二=高齡換照（G欄5人池，2026/9起）
+    // 檢查 5（ver4.9）：卡介苗/高齡認知欄位規則
+    //   首週二=卡介苗（Q欄3人池）、其餘週二=高齡認知（G欄5人池，2026/9起）
     //   非業務日不應有值；當日不得兼任 E~K 其他門診關卡
     // ════════════════════════════════════════════════════════════════
     const bcgPoolV = check4Sheet.getRange('Q1:Q11').getValues().flat().map(String).map(s=>s.trim()).filter(Boolean);
     const cogPoolV = check4Sheet.getRange(GLOBAL_CONFIG.COG_STAFF_RANGE).getValues().flat().map(String).map(s=>s.trim()).filter(Boolean);
     if (cogActiveV) curRows.forEach(r => {
       if (!r.lVal) {
-        // 生效後的高齡換照日空班提示（非致命：可能名單未設定或全員排除）
+        // 生效後的高齡認知日空班提示（非致命：可能名單未設定或全員排除）
         if (r.lType === 'COG' && cogPoolV.length === 0) {
-          errors.push({ check: 5, msg: `【高齡換照】${r.ds} 空班：候選名單未設定（班表設定 G1:G8）`, ds: r.ds });
+          errors.push({ check: 5, msg: `【高齡認知】${r.ds} 空班：候選名單未設定（班表設定 G1:G8）`, ds: r.ds });
         }
         return;
       }
       if (r.lType === '') {
-        errors.push({ check: 5, msg: `【卡介/換照】${r.ds} 非業務日（非工作週二）不應有「${r.lVal}」`, ds: r.ds });
+        errors.push({ check: 5, msg: `【卡介苗/高齡認知】${r.ds} 非業務日（非工作週二）不應有「${r.lVal}」`, ds: r.ds });
         return;
       }
       if (r.lType === 'BCG' && bcgPoolV.length && bcgPoolV.indexOf(r.lVal) === -1) {
         errors.push({ check: 5, msg: `【卡介苗】${r.ds}「${r.lVal}」不在卡介苗資格名單（Q欄）`, ds: r.ds });
       }
       if (r.lType === 'COG' && cogPoolV.length && cogPoolV.indexOf(r.lVal) === -1) {
-        errors.push({ check: 5, msg: `【高齡換照】${r.ds}「${r.lVal}」不在高齡換照資格名單（G欄）`, ds: r.ds });
+        errors.push({ check: 5, msg: `【高齡認知】${r.ds}「${r.lVal}」不在高齡認知資格名單（G欄）`, ds: r.ds });
       }
       // 當日不得兼任 E~K 其他門診關卡（A2:M32 index 4~10）
       for (let idx = 4; idx <= 10; idx++) {
         const nm = (r.row[idx]||'').toString().trim();
         if (nm && nm === r.lVal) {
-          const lbl = r.lType === 'COG' ? '高齡換照' : '卡介苗';
+          const lbl = r.lType === 'COG' ? '高齡認知' : '卡介苗';
           errors.push({ check: 5, msg: `【${lbl}】${r.ds}「${r.lVal}」同日兼任其他門診關卡（不允許）`, ds: r.ds });
           break;
         }
@@ -5383,9 +5383,10 @@ function autoValidateSchedule(sheetName) {
       }
       // check 5（ver4.9）：L欄被人工挪移 → 視為提示非失誤
       if (e.check === 5) {
-        return !!(manualChanges[(e.ds||'')+'|卡介/換照'] ||
+        return !!(manualChanges[(e.ds||'')+'|卡介苗/高齡認知'] ||
                   manualChanges[(e.ds||'')+'|卡介苗'] ||
-                  manualChanges[(e.ds||'')+'|高齡換照']);
+                  manualChanges[(e.ds||'')+'|高齡認知'] ||
+                  manualChanges[(e.ds||'')+'|卡介/換照']);
       }
       return false;
     };
@@ -5411,9 +5412,9 @@ function autoValidateSchedule(sheetName) {
       { id: 3, label: '值班/停班2線衝突', pass: c3.real.length === 0, errors: c3.real, notices: c3.notices },
       { id: 4, label: '門診公平度(±2)',  pass: c4.real.length === 0, errors: c4.real, notices: c4.notices },
     ];
-    // ver4.9：高齡換照生效後才顯示 L 欄檢查項
+    // ver4.9：高齡認知生效後才顯示 L 欄檢查項
     if (cogActiveV) {
-      checksArr.push({ id: 5, label: '卡介/換照欄位', pass: c5.real.length === 0, errors: c5.real, notices: c5.notices });
+      checksArr.push({ id: 5, label: '卡介苗/高齡認知欄位', pass: c5.real.length === 0, errors: c5.real, notices: c5.notices });
     }
 
     return {
@@ -5934,13 +5935,13 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
     // ★ 修正：先收集新紀錄，最後一次 setValues 批次寫回。
     //   原逐筆 setValue 寫法在日誌區滿載時 logRow 被封頂在 460，同批多筆會互相覆蓋只剩最後一筆；
     //   批次寫回改為「既有＋新增，保留最新 421 筆」（滿載時最舊的被擠掉），且寫入次數 N 次 → 1 次。
-    // ver4.9：L欄「卡介/換照」依日期翻譯為 卡介苗/高齡換照，日誌才可正確反推與顯示
+    // ver4.9：L欄「卡介苗/高齡認知」依日期翻譯為 卡介苗/高齡認知，日誌才可正確反推與顯示
     const _lHdrFix = (hdr, dateStr) => {
-      if (hdr !== '卡介/換照' && hdr !== '卡介苗') return hdr;
+      if (hdr !== '卡介苗/高齡認知' && hdr !== '卡介苗' && hdr !== '卡介/換照') return hdr;
       const dObj = parseDateFromSheet((dateStr||'').split(' ')[0], sheetName);
       if (!dObj) return hdr;
       const lt = getLTypeForDate(dObj);
-      return lt === 'COG' ? '高齡換照' : lt === 'BCG' ? '卡介苗' : hdr;
+      return lt === 'COG' ? '高齡認知' : lt === 'BCG' ? '卡介苗' : hdr;
     };
     const newEntries = [];
     (logs || []).forEach(log => {
@@ -6000,12 +6001,12 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
     sheet.getRange('A2:A32').setNumberFormat('@');
     sheet.getRange(2, 3, rows.length, 11).setValues(rows); // C2:M(2+n)
 
-    // ★ ver4.9：高齡換照生效後，L1 標題自動更新為「卡介/換照」
+    // ★ ver4.9：高齡認知生效後，L1 標題自動更新為「卡介苗/高齡認知」
     try {
       const pYm = parseYearMonthFromSheetName(sheetName);
       if (pYm.valid && isCognitiveActive(pYm.year, pYm.month)) {
         const l1v = (sheet.getRange('L1').getValue() || '').toString().trim();
-        if (l1v === '卡介苗') sheet.getRange('L1').setValue('卡介/換照');
+        if (l1v === '卡介苗' || l1v === '卡介/換照') sheet.getRange('L1').setValue('卡介苗/高齡認知');
       }
     } catch(eL1) {}
 
