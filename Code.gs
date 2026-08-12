@@ -778,7 +778,8 @@ function getScheduleData(sheetName) {
     cogActive:       _ymForCog.valid ? isCognitiveActive(_ymForCog.year, _ymForCog.month) : false,
     lTypes:          lTypes,
     bcgStaff:        (function(){ try { return getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME).getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(n=>n&&n.toString().trim()).map(n=>n.toString().trim()); } catch(e){ return []; } })(),
-    cogStaff:        getCogStaffNames()
+    cogStaff:        getCogStaffNames(),
+    fairCfg:         getFairnessConfig()
   };
 }
 
@@ -3128,7 +3129,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       cogActive:       cogActive,
       lTypes:          lTypes,
       bcgStaff:        (shiftStaffMap['L'] || []).filter(Boolean),
-      cogStaff:        cogNames
+      cogStaff:        cogNames,
+      fairCfg:         fairCfg
     };
 
   } catch(e) {

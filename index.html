@@ -2592,6 +2592,7 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
     // ver4.9：L欄業務類型（BCG/COG）＋兩池名單（卡介苗Q欄/高齡認知G欄）
     lTypes: r.lTypes || [], cogActive: !!r.cogActive,
     bcgStaff: r.bcgStaff || [], cogStaff: r.cogStaff || [],
+    fairCfg: r.fairCfg || { weightBcg: 1.5, weightCog: 1.5 },
     // ver4.7：把停班2線系統挪移資訊存入，供異動清單顯示
     dengSwapped: r.dengSwapped || [], dengSwapDateMap: r.dengSwapDateMap || {} };
   _fpDragMode    = true;
@@ -3390,6 +3391,9 @@ function buildFpStats(){
   });
 
   // ── 欄位定義（週別分欄）─────────────────────────────────────────
+  // ver4.9：資格關卡加權顯示設定（引擎公平分同基準）
+  var _fpFc   = (_fpPreviewData && _fpPreviewData.fairCfg) || { weightBcg: 1.5, weightCog: 1.5 };
+  var _fpUseW = !!(_fpPreviewData && _fpPreviewData.cogActive);
   var dutyCols = [
     {key:'值班_平',  label:'值班(平)', title:'值班（平日）',     bg:'#e3f2fd'},
     {key:'值班_假',  label:'值班(假)', title:'值班（假日）',     bg:'#fff3e0'},
@@ -3409,8 +3413,9 @@ function buildFpStats(){
     {key:hJab1+'_二',  label:'注射1(二)',   title:'注射1（週二）',    bg:'#fff9c4'},
     {key:hJab1+'_四',  label:'注射1(四)',   title:'注射1（週四）',    bg:'#fff176'},
     {key:hJab2,        label:'注射2',       title:'注射2（週二）',    bg:'#ffe082'},
-    {key:'卡介苗',     label:'卡介苗',      title:'卡介苗（首週二）', bg:'#fce4ec'},
-    {key:'高齡認知',   label:'高齡認知',    title:'高齡認知（其餘週二）', bg:'#b2dfdb'}
+    // ver4.9 雙帳本：資格關卡 1 次顯示為加權分（生效月才加權，不追溯）
+    {key:'卡介苗',     label:'卡介苗',      title:'卡介苗（首週二）'+(_fpUseW?'，1次計'+_fpFc.weightBcg+'分':''), bg:'#fce4ec', w:(_fpUseW?_fpFc.weightBcg:1)},
+    {key:'高齡認知',   label:'高齡認知',    title:'高齡認知（其餘週二）'+(_fpUseW?'，1次計'+_fpFc.weightCog+'分':''), bg:'#b2dfdb', w:(_fpUseW?_fpFc.weightCog:1)}
   ];
 
   // 篩掉全 0 欄
@@ -3431,15 +3436,20 @@ function buildFpStats(){
     colList.forEach(function(col){
       h+='<th title="'+x(col.title)+'" style="background:'+col.bg+';padding:3px 6px;text-align:center;border:1px solid #e0e0e0;white-space:nowrap;min-width:36px;font-size:.68rem">'+x(col.label)+'</th>';
     });
-    h+='<th style="background:#e8eaf6;padding:3px 6px;text-align:center;border:1px solid #e0e0e0">合計</th></tr></thead><tbody>';
+    var _hasW = colList.some(function(c){ return (c.w||1) > 1; });
+    h+='<th style="background:#e8eaf6;padding:3px 6px;text-align:center;border:1px solid #e0e0e0;white-space:nowrap">'+(_hasW?'合計(公平分)':'合計')+'</th></tr></thead><tbody>';
     nList.forEach(function(nm, ni){
       var rb = ni%2===0?'#fff':'#f9f9f9';
       h+='<tr style="background:'+rb+'"><td style="padding:3px 8px;font-weight:700;border:1px solid #e0e0e0;white-space:nowrap;position:sticky;left:0;background:'+rb+';z-index:1">'+x(nm)+'</td>';
       var tot=0;
       colList.forEach(function(col){
-        var n2=(stat[nm]&&stat[nm][col.key])||0; tot+=n2;
-        h+='<td style="text-align:center;padding:3px 4px;border:1px solid #e0e0e0;background:'+(n2>0?col.bg:'transparent')+';color:'+(n2>0?'#333':'#ccc')+'">'+( n2>0?n2:'–')+'</td>';
+        var wgt = col.w || 1;
+        var raw = (stat[nm]&&stat[nm][col.key])||0;
+        var n2  = Math.round(raw*wgt*10)/10;   // ver4.9：資格關卡顯示加權分（1次=1.5）
+        tot += n2;
+        h+='<td style="text-align:center;padding:3px 4px;border:1px solid #e0e0e0;background:'+(raw>0?col.bg:'transparent')+';color:'+(raw>0?'#333':'#ccc')+';font-weight:'+(wgt>1&&raw>0?'700':'inherit')+'">'+( raw>0?n2:'–')+'</td>';
       });
+      tot = Math.round(tot*10)/10;
       h+='<td style="text-align:center;font-weight:700;padding:3px 6px;border:1px solid #e0e0e0;background:#e8eaf6;color:#1565c0">'+tot+'</td></tr>';
     });
     return h+'</tbody></table>';
@@ -3452,7 +3462,7 @@ function buildFpStats(){
   // ── 差異備註：總次數 vs 平均 ─────────────────────────────────
   if(clinicNames.length > 0){
     var totals = clinicNames.map(function(n){
-      return clinicCols.reduce(function(s,col){ return s+((stat[n]&&stat[n][col.key])||0); }, 0);
+      return clinicCols.reduce(function(s,col){ return s+((stat[n]&&stat[n][col.key])||0)*(col.w||1); }, 0);
     });
     var grandTotal = totals.reduce(function(s,v){return s+v;},0);
     var avg = grandTotal / clinicNames.length;
@@ -3461,7 +3471,7 @@ function buildFpStats(){
       var diff = Math.round((avg - totals[i]) * 10) / 10;
       return diff > 0 ? x(n)+'少'+diff : null;
     }).filter(Boolean);
-    var noteHtml = '目前平均 <b>'+avgDisp+'</b>　'
+    var noteHtml = (_fpUseW?'目前公平分平均':'目前平均')+' <b>'+avgDisp+'</b>　'
       + (belowList.length ? belowList.join('、') : '各人次數均衡');
     html += '<div style="margin-top:8px;padding:5px 10px;background:#f3f8ff;border:1px solid #90caf9;border-radius:7px;font-size:.72rem;color:#1565c0">📊 '+noteHtml+'</div>';
   }
@@ -4233,7 +4243,8 @@ function previewPendingSheet(sheetName){
         cogActive:   !!data.cogActive,
         lTypes:      data.lTypes   || [],
         bcgStaff:    data.bcgStaff || [],
-        cogStaff:    data.cogStaff || []
+        cogStaff:    data.cogStaff || [],
+        fairCfg:     data.fairCfg  || { weightBcg: 1.5, weightCog: 1.5 }
       };
       // 版次字母
       var wc = data.writeCount || 0;
