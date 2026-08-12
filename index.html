@@ -3781,6 +3781,16 @@ function showAddPicker(td, rowIdx, ci, replaceMode){
   var list   = el('fpAddPickerList');
   if(!picker || !list) return;
 
+  // ver4.9：護理師門診~卡介苗/高齡認知（ci 2~9）選單放大——一次看完整份名單不用捲動
+  var isClinicPicker = (ci >= 2 && ci <= 9);
+  if(isClinicPicker){
+    picker.style.minWidth  = '340px';
+    picker.style.maxHeight = 'min(78vh, 660px)';
+  } else {
+    picker.style.minWidth  = '185px';
+    picker.style.maxHeight = '300px';
+  }
+
   // ── 取得候選清單 ────────────────────────────────────────────────
   var _isDutyPicker = (ci === 0 || ci === 1 || ci === 10);
   var nurses, monthCiCount = {}, monthTotalCount = {};
@@ -3865,20 +3875,32 @@ function showAddPicker(td, rowIdx, ci, replaceMode){
     var mt = monthTotalCount[n]||0;
     // 計算平均月次數（totalSlots / nurseCount）
     var avg = nurses.length > 0 ? (nurses.reduce(function(s2,nm){ return s2+(monthTotalCount[nm]||0); },0)/nurses.length) : 0;
-    var diffStr = mt < Math.round(avg) ? ' <span style="color:#c62828;font-size:.65rem">少'+(Math.round(avg)-mt)+'</span>' : '';
+    var diffStr = mt < Math.round(avg) ? ' <span style="color:#c62828;font-size:'+(isClinicPicker?'.72rem':'.65rem')+'">少'+(Math.round(avg)-mt)+'</span>' : '';
     var safeName = n.replace(/\\/g,'\\\\').replace(/"/g,'&quot;');
-    return '<div class="fp-add-nurse-item" onclick="pickAddNurse(&quot;'+safeName+'&quot;)" '
-      +'style="padding:6px 14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #f5f5f5">'
-      +'<span style="font-size:.85rem;font-weight:700">'+x(n)+'</span>'
-      +'<span style="font-size:.68rem;color:#888;white-space:nowrap">本欄'+mc+'次 總'+mt+diffStr+'</span>'
+    // ver4.9：門診類選單 hover 人名 → 表格同步閃爍該人的門診~卡介/高齡班格
+    var hoverAttr = isClinicPicker
+      ? ' onmouseover="fpHlByName(&quot;'+safeName+'&quot;)" onmouseout="fpClearHl()"'
+      : '';
+    var itemPad = isClinicPicker ? '10px 18px' : '6px 14px';
+    var nameFs  = isClinicPicker ? '.95rem' : '.85rem';
+    var subFs   = isClinicPicker ? '.76rem' : '.68rem';
+    return '<div class="fp-add-nurse-item" onclick="pickAddNurse(&quot;'+safeName+'&quot;)"'+hoverAttr
+      +' style="padding:'+itemPad+';cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #f5f5f5">'
+      +'<span style="font-size:'+nameFs+';font-weight:700">'+x(n)+'</span>'
+      +'<span style="font-size:'+subFs+';color:#888;white-space:nowrap">本欄'+mc+'次 總'+mt+diffStr+'</span>'
       +'</div>';
   }).join('');
 
-  // 定位
-  var rect = td.getBoundingClientRect();
-  picker.style.left = Math.min(rect.left, window.innerWidth - 190) + 'px';
-  picker.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+  // 定位（ver4.9：先顯示量尺寸，夾在視窗內——選單放大後避免超出畫面要捲頁）
   picker.style.display = 'block';
+  var rect = td.getBoundingClientRect();
+  var pw  = picker.offsetWidth  || 200;
+  var phh = picker.offsetHeight || 200;
+  var lx = Math.min(rect.left, window.innerWidth - pw - 10);
+  var ty = rect.bottom + 4;
+  if(ty + phh > window.innerHeight - 8) ty = Math.max(8, window.innerHeight - phh - 8);
+  picker.style.left = Math.max(4, lx) + 'px';
+  picker.style.top  = ty + 'px';
 
   // 點選外部關閉
   setTimeout(function(){
@@ -3897,6 +3919,24 @@ function hideAddPicker(){
   var picker = el('fpAddPicker');
   if(picker) picker.style.display = 'none';
   _fpAddTarget = null;
+  fpClearHl();  // ver4.9：關閉選單同步清除同名格閃爍
+}
+
+// ver4.9：依人名閃爍其「門診~卡介苗/高齡認知」班格（ci 2~9，替換選單 hover 用）
+function fpHlByName(name){
+  fpClearHl();
+  if(!name || !_fpPreviewData) return;
+  var pv = _fpPreviewData.preview || [];
+  for(var ri = 0; ri < pv.length; ri++){
+    var row = pv[ri] || [];
+    for(var ci = 2; ci <= 9; ci++){
+      var v = row[ci];
+      if(v && v.toString().trim() === name){
+        var td = getFpTd(ri, ci);
+        if(td) td.classList.add('fp-hl');
+      }
+    }
+  }
 }
 
 function pickAddNurse(name){
