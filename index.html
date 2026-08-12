@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="version" content="ver5.1">
+<meta name="version" content="ver5.2">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -359,7 +359,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
       </button>
     </div>
     <div class="lx-panel-footer">
-      <span class="lx-ver">ver 5.1</span>
+      <span class="lx-ver">ver 5.2</span>
       <span>佳里區衛生所 ©2026</span>
     </div>
     <div id="lt"><div class="sp" style="border-color:rgba(43,120,214,.2);border-top-color:var(--lx-blue1)"></div></div>
@@ -1089,7 +1089,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
               站 1 次資格關卡（卡介苗／高齡認知）在公平計算中折抵「係數」次一般關卡（雙帳本制：看板同時公開實際次數與獎勵分）。<br>
               滾動月數＝跨月公平比較視窗，只看最近 N 個月的每在職月平均，新人不會被歷史累積拖著比。
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
               <div>
                 <label style="font-size:.72rem;color:#888;display:block;margin-bottom:3px">卡介苗係數（F1）</label>
                 <input type="text" id="sysconfWeightBcg" data-f="fair" placeholder="1.5" disabled
@@ -1105,8 +1105,13 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
                 <input type="text" id="sysconfRollingM" data-f="fair" placeholder="3" disabled
                   style="width:100%;padding:8px 10px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.88rem;background:#f5f5f5;outline:none;font-family:var(--f);margin:0;box-shadow:none">
               </div>
+              <div>
+                <label style="font-size:.72rem;color:#b71c1c;display:block;margin-bottom:3px">值班確認秒數（F4）</label>
+                <input type="text" id="sysconfDutySec" data-f="fair" placeholder="5" disabled
+                  style="width:100%;padding:8px 10px;border:1.5px solid #ef9a9a;border-radius:6px;font-size:.88rem;background:#f5f5f5;outline:none;font-family:var(--f);margin:0;box-shadow:none">
+              </div>
             </div>
-            <div style="font-size:.7rem;color:#999;margin-top:6px">係數需 ≥ 1（1＝無獎勵純平均）；滾動月數 1~12（預設 3）。</div>
+            <div style="font-size:.7rem;color:#999;margin-top:6px">係數需 ≥ 1（1＝無獎勵純平均）；滾動月數 1~12（預設 3）；值班確認秒數 0~60（預設 5，0＝不倒數直接可按）。</div>
           </div>
 
           <!-- 值班輪序 -->
@@ -1451,7 +1456,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
   </div>
 </div>
 
-<div id="vi">ver 5.1</div>
+<div id="vi">ver 5.2</div>
 <div id="ca"></div>
 
 <script>
@@ -2979,16 +2984,23 @@ function showFpDutyConfirm(detail, cb){
   if(desc) desc.innerHTML = detail || '';
   ov.style.display = 'flex';
   var okBtn = el('fpDutyOk'), cancelBtn = el('fpDutyCancel');
-  var remain = 5;
+  // ver5.2：冷靜秒數由後台設定（班表設定F4，預設5，0=不倒數直接可按）
+  var _fcD = (_fpPreviewData && _fpPreviewData.fairCfg) || {};
+  var remain = parseInt(_fcD.dutyConfirmSec);
+  if(isNaN(remain) || remain < 0) remain = 5;
   if(_fpDutyTimer){ clearInterval(_fpDutyTimer); _fpDutyTimer = null; }
-  if(okBtn){ okBtn.disabled = true; okBtn.textContent = '確認更動（'+remain+'）'; }
-  _fpDutyTimer = setInterval(function(){
-    remain--;
-    if(remain <= 0){
-      clearInterval(_fpDutyTimer); _fpDutyTimer = null;
-      if(okBtn){ okBtn.disabled = false; okBtn.textContent = '✅ 確認更動值班'; }
-    } else if(okBtn){ okBtn.textContent = '確認更動（'+remain+'）'; }
-  }, 1000);
+  if(remain <= 0){
+    if(okBtn){ okBtn.disabled = false; okBtn.textContent = '✅ 確認更動值班'; }
+  } else {
+    if(okBtn){ okBtn.disabled = true; okBtn.textContent = '確認更動（'+remain+'）'; }
+    _fpDutyTimer = setInterval(function(){
+      remain--;
+      if(remain <= 0){
+        clearInterval(_fpDutyTimer); _fpDutyTimer = null;
+        if(okBtn){ okBtn.disabled = false; okBtn.textContent = '✅ 確認更動值班'; }
+      } else if(okBtn){ okBtn.textContent = '確認更動（'+remain+'）'; }
+    }, 1000);
+  }
   function _close(res){
     ov.style.display = 'none';
     if(_fpDutyTimer){ clearInterval(_fpDutyTimer); _fpDutyTimer = null; }
@@ -5700,6 +5712,7 @@ function renderSyscconf(){
   if(el('sysconfWeightBcg')) el('sysconfWeightBcg').value = (sysconfData.weightBcg     !== undefined ? sysconfData.weightBcg     : 1.5);
   if(el('sysconfWeightCog')) el('sysconfWeightCog').value = (sysconfData.weightCog     !== undefined ? sysconfData.weightCog     : 1.5);
   if(el('sysconfRollingM'))  el('sysconfRollingM').value  = (sysconfData.rollingMonths !== undefined ? sysconfData.rollingMonths : 3);
+  if(el('sysconfDutySec'))   el('sysconfDutySec').value   = (sysconfData.dutyConfirmSec !== undefined ? sysconfData.dutyConfirmSec : 5);
 
   // 班表欄位名稱（從後端讀取）
   var colLetters = ['C','D','E','F','G','H','I','J','K','L','M'];
@@ -5752,6 +5765,7 @@ function saveSysconf(){
     weightBcg:     el('sysconfWeightBcg') ? el('sysconfWeightBcg').value.trim() : '',
     weightCog:     el('sysconfWeightCog') ? el('sysconfWeightCog').value.trim() : '',
     rollingMonths: el('sysconfRollingM')  ? el('sysconfRollingM').value.trim()  : '',
+    dutyConfirmSec: el('sysconfDutySec')  ? el('sysconfDutySec').value.trim()   : '',
     newAdminPwd: newPwd
   };
   amsg('sysconfMsg','儲存中…','#546e7a');

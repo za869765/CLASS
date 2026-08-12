@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.1 - 高齡認知關卡＋雙帳本資格加權＋滾動公平基準＋浮標明細/上色/閃爍＋日別正名＋值班防呆＋紙本提醒
+// ver5.2 - ver5.1全功能＋值班確認冷靜秒數後台可調（班表設定F4，預設5秒/0=不倒數）
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -64,6 +64,7 @@ const GLOBAL_CONFIG = {
   QUAL_WEIGHT_BCG:    'F1',
   QUAL_WEIGHT_COG:    'F2',
   ROLLING_MONTHS:     'F3',
+  DUTY_CONFIRM_SEC:   'F4',   // 值班更動確認冷靜倒數秒數（預設5，0=不倒數）
   AUTO_SCHEDULE: {
     STAFF_RANGE:    'I1:I11',
     EMPID_RANGE:    'M1:M11',
@@ -238,16 +239,20 @@ function getCogStaffNames() {
 
 // 公平制度設定（F1卡介苗係數 / F2高齡認知係數 / F3滾動月數），空白用預設
 function getFairnessConfig() {
-  const def = { weightBcg: 1.5, weightCog: 1.5, rollingMonths: 3 };
+  const def = { weightBcg: 1.5, weightCog: 1.5, rollingMonths: 3, dutyConfirmSec: 5 };
   try {
     const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
     const wb = parseFloat(sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_BCG).getValue());
     const wc = parseFloat(sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_COG).getValue());
     const rm = parseInt(sheet.getRange(GLOBAL_CONFIG.ROLLING_MONTHS).getValue());
+    const dcRaw = sheet.getRange(GLOBAL_CONFIG.DUTY_CONFIRM_SEC).getValue();
+    const dc = parseInt(dcRaw);
     return {
       weightBcg:     (isNaN(wb) || wb < 1) ? def.weightBcg : wb,
       weightCog:     (isNaN(wc) || wc < 1) ? def.weightCog : wc,
-      rollingMonths: (isNaN(rm) || rm < 1) ? def.rollingMonths : Math.min(rm, 12)
+      rollingMonths: (isNaN(rm) || rm < 1) ? def.rollingMonths : Math.min(rm, 12),
+      // 值班確認冷靜秒數：空白=預設5；0=不倒數；上限60
+      dutyConfirmSec: (dcRaw === '' || dcRaw === null || isNaN(dc) || dc < 0) ? def.dutyConfirmSec : Math.min(dc, 60)
     };
   } catch(e) { return def; }
 }
@@ -1778,9 +1783,10 @@ function getSystemSettings() {
       dutyNames:   dutyNames.filter(n=>n).map(n=>n.toString().trim()),
       dengueNames: dengueNames.filter(n=>n).map(n=>n.toString().trim()),
       cogNames:    cogNames.filter(n=>n).map(n=>n.toString().trim()),
-      weightBcg:     fairCfg.weightBcg,
-      weightCog:     fairCfg.weightCog,
-      rollingMonths: fairCfg.rollingMonths
+      weightBcg:      fairCfg.weightBcg,
+      weightCog:      fairCfg.weightCog,
+      rollingMonths:  fairCfg.rollingMonths,
+      dutyConfirmSec: fairCfg.dutyConfirmSec
     };
   } catch(e) { return { success: false, message: e.message }; }
 }
@@ -1823,6 +1829,10 @@ function saveSystemSettings(adminPassword, settings) {
     if (settings.rollingMonths !== undefined && settings.rollingMonths !== '') {
       const rm = parseInt(settings.rollingMonths);
       if (!isNaN(rm) && rm >= 1 && rm <= 12) sheet.getRange(GLOBAL_CONFIG.ROLLING_MONTHS).setValue(rm);
+    }
+    if (settings.dutyConfirmSec !== undefined && settings.dutyConfirmSec !== '') {
+      const dc = parseInt(settings.dutyConfirmSec);
+      if (!isNaN(dc) && dc >= 0 && dc <= 60) sheet.getRange(GLOBAL_CONFIG.DUTY_CONFIRM_SEC).setValue(dc);
     }
     if (settings.newAdminPwd && settings.newAdminPwd.trim()) sheet.getRange('N2').setValue(settings.newAdminPwd.trim());
     writeOpLog('系統設定', '儲存系統設定');
