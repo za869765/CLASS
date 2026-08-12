@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="version" content="ver4.8">
+<meta name="version" content="ver4.9">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -356,7 +356,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
       </button>
     </div>
     <div class="lx-panel-footer">
-      <span class="lx-ver">ver 4.8</span>
+      <span class="lx-ver">ver 4.9</span>
       <span>佳里區衛生所 ©2026</span>
     </div>
     <div id="lt"><div class="sp" style="border-color:rgba(43,120,214,.2);border-top-color:var(--lx-blue1)"></div></div>
@@ -573,6 +573,12 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
       <div style="background:#fce4ec;border-radius:10px;padding:12px 14px;margin-bottom:12px">
         <div style="font-weight:700;color:#c62828;margin-bottom:6px">🩹 卡介苗　<span style="font-size:.75rem;background:#c62828;color:#fff;border-radius:4px;padding:1px 7px">第一優先</span></div>
         當月第一個週二工作日，由特別資格護理師輪替，擔任卡介苗的人員當日不會排其他門診相關職務，可與值班同時存在。
+      </div>
+
+      <div style="background:#e0f2f1;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;color:#00695c;margin-bottom:6px">🚗 高齡換照　<span style="font-size:.75rem;background:#00695c;color:#fff;border-radius:4px;padding:1px 7px">2026/9起</span></div>
+        除第一個週二（卡介苗日）外的每個工作週二，由高齡換照資格護理師（5人池）輪替，與卡介苗共用班表「卡介/換照」欄位。擔任當日不排其他門診相關職務。<br>
+        <span style="font-size:.8rem;color:#00796b">💡 受訓獎勵：站 1 次資格關卡（卡介苗/高齡換照）在公平計算中折抵 1.5 次一般關卡（係數可調），受訓者實際上場次數會較少——這是制度給受訓的回報，看板同步公開「實際次數＋獎勵分」供查核。</span>
       </div>
 
       <div style="background:#f3e5f5;border-radius:10px;padding:12px 14px;margin-bottom:12px">
@@ -1044,9 +1050,45 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
           </div>
 
           <!-- 卡介苗名單 -->
-          <div style="font-size:.85rem;font-weight:700;color:#283593;margin-bottom:6px">🩹 卡介苗候選（Q欄，奇偶月交替）<span style="font-size:.72rem;color:#888;font-weight:400">　勾選後可用 ↑↓ 調整輪序</span></div>
+          <div style="font-size:.85rem;font-weight:700;color:#283593;margin-bottom:6px">🩹 卡介苗候選（Q欄，首週二輪值）<span style="font-size:.72rem;color:#888;font-weight:400">　勾選後可用 ↑↓ 調整輪序</span></div>
           <div style="background:#fff;border:1px solid #c5cae9;border-radius:8px;padding:10px;margin-bottom:12px">
             <div id="sysconfBcgList" style="display:flex;flex-direction:column;gap:5px"></div>
+          </div>
+
+          <!-- 高齡換照名單（ver4.9） -->
+          <div style="font-size:.85rem;font-weight:700;color:#283593;margin-bottom:6px">🚗 高齡換照候選（G欄，首週二以外的週二輪值）<span style="font-size:.72rem;color:#888;font-weight:400">　勾選後可用 ↑↓ 調整輪序</span></div>
+          <div style="background:#fff;border:1px solid #c5cae9;border-radius:8px;padding:10px;margin-bottom:12px">
+            <div style="font-size:.72rem;color:#00695c;background:#e0f2f1;border-radius:6px;padding:5px 10px;margin-bottom:8px">
+              與卡介苗共用班表 L 欄「卡介/換照」：每月第一個工作週二＝卡介苗、其餘週二＝高齡換照，時間互補不衝突。2026/9 起生效。
+            </div>
+            <div id="sysconfCogList" style="display:flex;flex-direction:column;gap:5px"></div>
+          </div>
+
+          <!-- 受訓獎勵／公平制度設定（ver4.9） -->
+          <div style="font-size:.85rem;font-weight:700;color:#283593;margin-bottom:6px">🎖 受訓獎勵／公平制度設定</div>
+          <div style="background:#fff;border:1px solid #c5cae9;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+            <div style="font-size:.76rem;color:#555;background:#e8f5e9;border-radius:6px;padding:6px 10px;margin-bottom:10px;line-height:1.8">
+              站 1 次資格關卡（卡介苗／高齡換照）在公平計算中折抵「係數」次一般關卡（雙帳本制：看板同時公開實際次數與獎勵分）。<br>
+              滾動月數＝跨月公平比較視窗，只看最近 N 個月的每在職月平均，新人不會被歷史累積拖著比。
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+              <div>
+                <label style="font-size:.72rem;color:#888;display:block;margin-bottom:3px">卡介苗係數（F1）</label>
+                <input type="text" id="sysconfWeightBcg" data-f="fair" placeholder="1.5" disabled
+                  style="width:100%;padding:8px 10px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.88rem;background:#f5f5f5;outline:none;font-family:var(--f);margin:0;box-shadow:none">
+              </div>
+              <div>
+                <label style="font-size:.72rem;color:#888;display:block;margin-bottom:3px">高齡換照係數（F2）</label>
+                <input type="text" id="sysconfWeightCog" data-f="fair" placeholder="1.5" disabled
+                  style="width:100%;padding:8px 10px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.88rem;background:#f5f5f5;outline:none;font-family:var(--f);margin:0;box-shadow:none">
+              </div>
+              <div>
+                <label style="font-size:.72rem;color:#888;display:block;margin-bottom:3px">滾動月數（F3）</label>
+                <input type="text" id="sysconfRollingM" data-f="fair" placeholder="3" disabled
+                  style="width:100%;padding:8px 10px;border:1.5px solid #c5cae9;border-radius:6px;font-size:.88rem;background:#f5f5f5;outline:none;font-family:var(--f);margin:0;box-shadow:none">
+              </div>
+            </div>
+            <div style="font-size:.7rem;color:#999;margin-top:6px">係數需 ≥ 1（1＝無獎勵純平均）；滾動月數 1~12（預設 3）。</div>
           </div>
 
           <!-- 值班輪序 -->
@@ -1391,7 +1433,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
   </div>
 </div>
 
-<div id="vi">ver 4.8</div>
+<div id="vi">ver 4.9</div>
 <div id="ca"></div>
 
 <script>
@@ -1872,7 +1914,7 @@ function viewSched(){
 function loadHdrs(){
   // ★ 效能：改為前端常數，省一次後端 round-trip。
   //   此陣列必須與 Code.gs GLOBAL_CONFIG.SHIFT_HEADERS 一致（兩者同專案部署，同步修改）
-  hdrs=["值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介苗","停班2線"];
+  hdrs=["值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介/換照","停班2線"];
 }
 
 function loadRecs(emp){
@@ -1894,6 +1936,8 @@ function openShiftM(date,col,cell){
   google.script.run
     .withSuccessHandler(function(data){
       hideLoad();
+      // ver4.9：L欄由後端依日期回傳正確名稱（卡介苗/高齡換照）
+      if(data.displayName) sn=data.displayName;
       el('shiftTitle').innerHTML='更換：'+x(date)+' '+x(sn)+'<br><small style="font-size:.82rem;color:#888">請選擇代理人</small>';
       selType=data.selectType||'SC';
       var con=el('soc');
@@ -1911,7 +1955,7 @@ function openShiftM(date,col,cell){
       setTimeout(function(){ if(!lastEmp) inp.focus(); },100);
     })
     .withFailureHandler(function(e){hideLoad();showAlert('載入選項失敗：'+e.message,true);})
-    .getShiftOptions(col);
+    .getShiftOptions(col, date, selSheet);  // ver4.9：L欄需依日期切換 卡介苗/高齡換照 選人池
 }
 
 function toggleOpt(el2,opt){
@@ -2083,7 +2127,12 @@ function renderClinicStats(r){
       joinDateSet:row.joinDateSet,
       isActive:   row.isActive,
       isResigned: row.isResigned,
-      onLeave:    row.onLeave
+      onLeave:    row.onLeave,
+      // ver4.9 雙帳本欄位（Codex review #4：映射時必須保留，否則獎勵分/公平分永遠顯示錯值）
+      bcgCnt:     row.bcgCnt    || 0,
+      cogCnt:     row.cogCnt    || 0,
+      qualBonus:  row.qualBonus || 0,
+      fairScore:  row.fairScore
     };
   });
   var COLORS = ['#1976d2','#388e3c','#f57c00','#7b1fa2','#c62828','#0097a7','#5d4037','#558b2f','#00838f','#558b2f','#f9a825','#ad1457'];
@@ -2163,13 +2212,19 @@ function renderClinicStats(r){
   }).join('');
 
   // ── 明細表
+  // ver4.9 雙帳本：是否顯示資格獎勵欄（後端有回傳 fairCfg 且任一人有獎勵分或已生效）
+  var showFair = !!(r.fairCfg);
   var thead = '<tr style="background:#388e3c;color:#fff">'
     +'<th style="padding:6px 8px;text-align:left">姓名</th>'
     +'<th style="padding:6px 4px;font-size:.68rem">在職<br>月數</th>'
     +'<th style="padding:6px 4px;font-size:.68rem">每月<br>均次</th>';
   hdrs.forEach(function(h){thead+='<th style="padding:6px 3px;font-size:.68rem">'+x(h)+'</th>';});
-  thead += '<th style="padding:6px 5px">合計</th>'
-    +'<th style="padding:6px 4px;font-size:.68rem">期望<br>補差</th></tr>';
+  thead += '<th style="padding:6px 5px">合計</th>';
+  if(showFair){
+    thead += '<th style="padding:6px 4px;font-size:.68rem;background:#1b5e20" title="資格班獎勵：卡介苗×'+((r.fairCfg.weightBcg-1).toFixed(1))+'＋高齡換照×'+((r.fairCfg.weightCog-1).toFixed(1))+'（2026/9起，不追溯）">獎勵<br>分</th>'
+      +'<th style="padding:6px 4px;font-size:.68rem;background:#1b5e20" title="公平分數＝實際合計＋獎勵分（排班引擎拉平的基準）">公平<br>分</th>';
+  }
+  thead += '<th style="padding:6px 4px;font-size:.68rem">期望<br>補差</th></tr>';
   el('clinicThead').innerHTML = thead;
 
   var colMax = hdrs.map(function(_,ci){
@@ -2219,10 +2274,38 @@ function renderClinicStats(r){
         +(cnt>0?'<b style="color:'+(isResigned?'#aaa':'inherit')+'">'+cnt+'</b>':'<span style="color:#ddd">-</span>')+'</td>';
     });
     var totalColor = isResigned ? '#aaa' : '#388e3c';
-    tbody += '<td style="padding:4px 5px;text-align:center;font-weight:900;color:'+totalColor+';font-size:.82rem">'+row.total+'</td>'
-      +'<td style="padding:4px;text-align:center;font-size:.72rem;color:'+(isResigned?'#bbb':dc)+'">'+( row.expected||0)+'<br><span style="font-size:.65rem">('+diffStr+')</span></td></tr>';
+    tbody += '<td style="padding:4px 5px;text-align:center;font-weight:900;color:'+totalColor+';font-size:.82rem">'+row.total+'</td>';
+    if(showFair){
+      var qb = row.qualBonus || 0;
+      var fs = (row.fairScore !== undefined) ? row.fairScore : row.total;
+      tbody += '<td style="padding:4px;text-align:center;font-size:.76rem;font-weight:700;color:'+(qb>0?'#e65100':'#bbb')+'">'+(qb>0?'+'+qb:'–')+'</td>'
+        +'<td style="padding:4px;text-align:center;font-size:.78rem;font-weight:900;color:#1b5e20">'+fs+'</td>';
+    }
+    tbody += '<td style="padding:4px;text-align:center;font-size:.72rem;color:'+(isResigned?'#bbb':dc)+'">'+( row.expected||0)+'<br><span style="font-size:.65rem">('+diffStr+')</span></td></tr>';
   });
   el('clinicTbody').innerHTML = tbody;
+
+  // ── ver4.9 雙帳本說明註記（公開透明：為什麼受訓者排比較少）──
+  if(showFair){
+    var noteEl = el('clinicFairNote');
+    if(!noteEl){
+      noteEl = document.createElement('div');
+      noteEl.id = 'clinicFairNote';
+      var tblRef = el('clinicTable');
+      if(tblRef && tblRef.parentNode && tblRef.parentNode.parentNode){
+        tblRef.parentNode.parentNode.insertBefore(noteEl, tblRef.parentNode.nextSibling);
+      }
+    }
+    if(noteEl){
+      noteEl.style.cssText='font-size:.72rem;color:#555;background:#f9fbe7;border:1px solid #c8e6c9;border-radius:8px;padding:8px 12px;margin-top:8px;line-height:1.8';
+      noteEl.innerHTML = '💡 <b>受訓獎勵制（2026/9 起，不追溯）</b>：站 1 次資格關卡（卡介苗係數 '
+        + r.fairCfg.weightBcg + '、高齡換照係數 ' + r.fairCfg.weightCog + '）等同折抵該係數次數的一般關卡。<br>'
+        + '「獎勵分」＝資格班次數 ×（係數−1）；「公平分」＝實際合計＋獎勵分。排班引擎以<b>公平分</b>拉平，'
+        + '因此受訓者實際上場次數較少是制度給的回報，非排班錯誤。跨月比較基準：滾動近 '
+        + r.fairCfg.rollingMonths + ' 個月每在職月平均（係數與月數可於系統設定調整）。';
+    }
+  }
+
   el('clinicStatsWrap').style.display='block';
   initNurseMonthSel(r);  // ★ 初始化護理師月份進程選單
 }
@@ -2506,6 +2589,9 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
 
   _fpPreviewData = { headers: headers, preview: preview, dates: dates, holRows: holRows,
     clinicStaff: r.clinicStaff || [],
+    // ver4.9：L欄業務類型（BCG/COG）＋兩池名單（卡介苗Q欄/高齡換照G欄）
+    lTypes: r.lTypes || [], cogActive: !!r.cogActive,
+    bcgStaff: r.bcgStaff || [], cogStaff: r.cogStaff || [],
     // ver4.7：把停班2線系統挪移資訊存入，供異動清單顯示
     dengSwapped: r.dengSwapped || [], dengSwapDateMap: r.dengSwapDateMap || {} };
   _fpDragMode    = true;
@@ -2947,6 +3033,22 @@ function makeFpTableDraggable(){
         // No-op if names are same
         if(srcName === dstName){ _fpDragSrc=null; return; }
 
+        // ver4.9：卡介/換照欄拖曳資格檢查（卡介苗日限Q欄池、高齡換照日限G欄池）
+        function _lPoolOk(rowI, personName){
+          if(!personName) return true;
+          var lt = fpLType(rowI);
+          var pool = lt === 'COG' ? (_fpPreviewData.cogStaff||[]) : (_fpPreviewData.bcgStaff||[]);
+          return pool.length === 0 || pool.indexOf(personName) !== -1;
+        }
+        if(dstCi === 9 && !_lPoolOk(dstRow, srcName)){
+          showAlert('「'+srcName+'」不具'+(fpLType(dstRow)==='COG'?'高齡換照':'卡介苗')+'資格，無法排入', true);
+          _fpDragSrc=null; return;
+        }
+        if(src.ci === 9 && !_lPoolOk(src.rowIdx, dstName)){
+          showAlert('「'+dstName+'」不具'+(fpLType(src.rowIdx)==='COG'?'高齡換照':'卡介苗')+'資格，無法對調', true);
+          _fpDragSrc=null; return;
+        }
+
         var headers = _fpPreviewData.headers || [];
         var dates   = _fpPreviewData.dates   || [];
 
@@ -3268,7 +3370,10 @@ function buildFpStats(){
         inc(nm, isHol?'值班_假':'值班_平');
       } else if(ci===1){
         inc(nm, hSupp);
-      } else if(ci>=2 && ci<=9){
+      } else if(ci===9){
+        // ver4.9：卡介/換照欄依業務類型分開計數
+        inc(nm, fpLType(ri)==='COG' ? '高齡換照' : '卡介苗');
+      } else if(ci>=2 && ci<=8){
         var hk = headers[ci]||('欄'+ci);
         if(MIX_CI[ci]){
           // 混合欄依星期分別計數
@@ -3304,7 +3409,8 @@ function buildFpStats(){
     {key:hJab1+'_二',  label:'注射1(二)',   title:'注射1（週二）',    bg:'#fff9c4'},
     {key:hJab1+'_四',  label:'注射1(四)',   title:'注射1（週四）',    bg:'#fff176'},
     {key:hJab2,        label:'注射2',       title:'注射2（週二）',    bg:'#ffe082'},
-    {key:hBCG,         label:'卡介苗',      title:'卡介苗',           bg:'#fce4ec'}
+    {key:'卡介苗',     label:'卡介苗',      title:'卡介苗（首週二）', bg:'#fce4ec'},
+    {key:'高齡換照',   label:'高齡換照',    title:'高齡換照（其餘週二）', bg:'#b2dfdb'}
   ];
 
   // 篩掉全 0 欄
@@ -3389,14 +3495,22 @@ function fpSlotActive(rowIdx, ci){
   if(ci === 7) return dow === 2 || dow === 4;
   // ci=8 注射2: 週二
   if(ci === 8) return dow === 2;
-  // ci=9 卡介苗: 每月第一個工作週二（直接看現有資料是否有值，或欄格已有人）
+  // ci=9 卡介/換照: ver4.9 優先用後端 lTypes（BCG=首週二卡介苗、COG=其餘週二高齡換照）
   if(ci === 9){
-    // 判斷此列是否是卡介苗日：preview 中 ci=9 有值即為有效格
+    var lts = _fpPreviewData && _fpPreviewData.lTypes || [];
+    if(lts.length > 0) return !!lts[rowIdx];  // 'BCG'/'COG' 皆為有效格
+    // fallback（無 lTypes 的舊資料）：preview 中 ci=9 有值即為有效格
     var preview = _fpPreviewData && _fpPreviewData.preview || [];
     var val = preview[rowIdx] && preview[rowIdx][9];
     return !!(val && val.toString().trim());
   }
   return false;
+}
+
+// ver4.9：取得某列 L 欄的業務類型（'BCG'|'COG'|''）
+function fpLType(rowIdx){
+  var lts = _fpPreviewData && _fpPreviewData.lTypes || [];
+  return lts[rowIdx] || '';
 }
 
 function makeFpTableAddable(){
@@ -3463,7 +3577,22 @@ function showAddPicker(td, rowIdx, ci, replaceMode){
   var _isDutyPicker = (ci === 0 || ci === 1 || ci === 10);
   var nurses, monthCiCount = {}, monthTotalCount = {};
 
-  if(_isDutyPicker){
+  if(ci === 9){
+    // ver4.9 卡介/換照欄：依當日業務類型使用正確資格池（BCG=Q欄3人、COG=G欄5人）
+    var lt9 = fpLType(rowIdx);
+    var pool9 = lt9 === 'COG'
+      ? (_fpPreviewData.cogStaff || [])
+      : (_fpPreviewData.bcgStaff || []);
+    nurses = pool9.slice();
+    nurses.forEach(function(n){ monthCiCount[n] = 0; monthTotalCount[n] = 0; });
+    // 此欄月計數：同類型日（BCG/COG 分開計）
+    (_fpPreviewData.preview || []).forEach(function(r2, ri2){
+      var v9 = r2[9]; if(!v9) return;
+      var nm9 = v9.toString().trim();
+      if(fpLType(ri2) === lt9 && monthCiCount.hasOwnProperty(nm9)) monthCiCount[nm9]++;
+      if(monthTotalCount.hasOwnProperty(nm9)) monthTotalCount[nm9]++;
+    });
+  } else if(_isDutyPicker){
     // 值班/支援/停班2線：從 preview 此欄出現的人員
     var _dMap = {};
     (_fpPreviewData && _fpPreviewData.preview || []).forEach(function(r2){
@@ -3503,6 +3632,12 @@ function showAddPicker(td, rowIdx, ci, replaceMode){
   });
 
   var hdrName = (_fpPreviewData.headers||[])[ci] || '';
+  // ver4.9：L欄依當日類型顯示正確名稱
+  if(ci === 9){
+    var _lt = fpLType(rowIdx);
+    if(_lt === 'COG') hdrName = '高齡換照';
+    else if(_lt === 'BCG') hdrName = '卡介苗';
+  }
   var dates = _fpPreviewData.dates || [];
   var ds = (dates[rowIdx] ? dates[rowIdx][0] : '') || '';
   var curOccupant = getCellName(rowIdx, ci);
@@ -4093,7 +4228,12 @@ function previewPendingSheet(sheetName){
         dengSwapped: data.dengSwapped || [],
         dengSwapDateMap: data.dengSwapDateMap || {},
         changes:     data.changes     || {},
-        clinicStaff: data.clinicStaff || []
+        clinicStaff: data.clinicStaff || [],
+        // ver4.9：L欄業務類型＋資格池（審核預覽的拖曳/選人/統計用）
+        cogActive:   !!data.cogActive,
+        lTypes:      data.lTypes   || [],
+        bcgStaff:    data.bcgStaff || [],
+        cogStaff:    data.cogStaff || []
       };
       // 版次字母
       var wc = data.writeCount || 0;
@@ -5261,8 +5401,14 @@ function renderSyscconf(){
   makePickList('sysconfKkList',    'kkNames');
   makePickList('sysconfClinicList','clinicNames');
   makePickList('sysconfBcgList',   'bcgNames');
+  makePickList('sysconfCogList',   'cogNames');   // ver4.9 高齡換照（G欄）
   makePickList('sysconfDutyList',  'dutyNames');
   makePickList('sysconfDengueList','dengueNames');
+
+  // ver4.9：受訓獎勵／公平制度設定值
+  if(el('sysconfWeightBcg')) el('sysconfWeightBcg').value = (sysconfData.weightBcg     !== undefined ? sysconfData.weightBcg     : 1.5);
+  if(el('sysconfWeightCog')) el('sysconfWeightCog').value = (sysconfData.weightCog     !== undefined ? sysconfData.weightCog     : 1.5);
+  if(el('sysconfRollingM'))  el('sysconfRollingM').value  = (sysconfData.rollingMonths !== undefined ? sysconfData.rollingMonths : 3);
 
   // 班表欄位名稱（從後端讀取）
   var colLetters = ['C','D','E','F','G','H','I','J','K','L','M'];
@@ -5309,8 +5455,12 @@ function saveSysconf(){
     kkNames:     sysconfData.kkNames.filter(function(n){return n;}),
     clinicNames: sysconfData.clinicNames.filter(function(n){return n;}),
     bcgNames:    sysconfData.bcgNames.filter(function(n){return n;}),
+    cogNames:    (sysconfData.cogNames||[]).filter(function(n){return n;}),  // ver4.9 高齡換照
     dutyNames:   (sysconfData.dutyNames||[]).filter(function(n){return n;}),
     dengueNames: (sysconfData.dengueNames||[]).filter(function(n){return n;}),
+    weightBcg:     el('sysconfWeightBcg') ? el('sysconfWeightBcg').value.trim() : '',
+    weightCog:     el('sysconfWeightCog') ? el('sysconfWeightCog').value.trim() : '',
+    rollingMonths: el('sysconfRollingM')  ? el('sysconfRollingM').value.trim()  : '',
     newAdminPwd: newPwd
   };
   amsg('sysconfMsg','儲存中…','#546e7a');

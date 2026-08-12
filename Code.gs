@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver4.8 - 效能優化（openById 快取/讀取合併）＋穩定性（ScriptLock/失敗誤報修正）
+// ver4.9 - 高齡換照關卡（L欄與卡介苗時間共用）＋雙帳本資格加權＋滾動月公平基準
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -46,7 +46,7 @@ const GLOBAL_CONFIG = {
     'I': 'K1:K8',   // 預登2
     'J': 'K1:K8',   // 預注1
     'K': 'K1:K8',   // 預注2
-    'L': 'Q1:Q11',   // 卡介苗
+    'L': 'Q1:Q11',   // 卡介/換照：首週二=卡介苗(Q欄)、其餘週二=高齡換照(COG_STAFF_RANGE)
     'M': 'B1:B11'   // 登革熱二線：B欄順序（登革熱專屬輪序）
   },
   SELECT_TYPE: {
@@ -54,8 +54,16 @@ const GLOBAL_CONFIG = {
     'I':'SC','J':'SC','K':'SC','L':'SC','M':'SC'
   },
   SHIFT_HEADERS: [
-    "值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介苗","停班2線"
+    "值班","支援","門診","掛號","前台","預登1","預登2注","注射1","注射2","卡介/換照","停班2線"
   ],
+  // ── 高齡換照／資格加權設定（ver4.9）─────────────────────────────
+  // G1:G8 = 高齡換照候選護理師名單（5人資格池）
+  // F1 = 卡介苗係數（預設1.5）  F2 = 高齡換照係數（預設1.5）
+  // F3 = 公平基準滾動月數（預設3）
+  COG_STAFF_RANGE:    'G1:G8',
+  QUAL_WEIGHT_BCG:    'F1',
+  QUAL_WEIGHT_COG:    'F2',
+  ROLLING_MONTHS:     'F3',
   AUTO_SCHEDULE: {
     STAFF_RANGE:    'I1:I11',
     EMPID_RANGE:    'M1:M11',
@@ -154,11 +162,72 @@ function isThursdayWorkday(dateObj) {
 }
 
 function getFirstTuesdayWorkday(year, month) {
-  for (let day = 1; day <= 7; day++) {
+  // ver4.9（Codex review #1）：改掃整個月。原本只掃 1~7 日，若該週二適逢國定假日
+  // 會回傳 -1 → 整月無卡介苗，且生效後所有週二被誤判為高齡換照。
+  // 「每月第一個工作週二」＝當月第一個「週二且非假日」的日子。
+  const lastDay = new Date(year, month, 0).getDate();
+  for (let day = 1; day <= lastDay; day++) {
     const d = new Date(year, month - 1, day);
     if (isTuesdayWorkday(d)) return d.getDate();
   }
   return -1;
+}
+
+// =============================================
+// ver4.9 高齡換照（L欄與卡介苗時間共用）
+// 規則：每月第一個工作週二=卡介苗(BCG)、其餘工作週二=高齡換照(COG)
+// 生效：2026年9月起，不追溯（之前的 L 欄一律視為卡介苗）
+// =============================================
+const COG_EFFECTIVE_YM = 2026 * 100 + 9;   // 202609
+
+function isCognitiveActive(year, month) {
+  return (year * 100 + month) >= COG_EFFECTIVE_YM;
+}
+
+// 判斷某日期 L 欄的業務類型：'BCG' | 'COG' | ''
+// 生效前：只有首週二回傳 'BCG'，其餘一律 ''
+function getLTypeForDate(dateObj) {
+  if (!dateObj) return '';
+  const d = new Date(dateObj);
+  if (!isTuesdayWorkday(d)) return '';
+  const y = d.getFullYear(), m = d.getMonth() + 1;
+  const firstTue = getFirstTuesdayWorkday(y, m);
+  if (d.getDate() === firstTue) return 'BCG';
+  return isCognitiveActive(y, m) ? 'COG' : '';
+}
+
+// L 欄顯示名稱（LINE / Email / 換班紀錄 / 自檢共用同一標準）
+function lDisplayName(dateObj) {
+  const t = getLTypeForDate(dateObj);
+  if (t === 'COG') return '高齡換照';
+  if (t === 'BCG') return '卡介苗';
+  return '卡介/換照';
+}
+
+// 高齡換照候選名單（班表設定 G1:G8）
+function getCogStaffNames() {
+  try {
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    return sheet.getRange(GLOBAL_CONFIG.COG_STAFF_RANGE).getValues().flat()
+      .filter(n => n && n.toString().trim() !== '')
+      .map(n => n.toString().trim());
+  } catch(e) { return []; }
+}
+
+// 公平制度設定（F1卡介苗係數 / F2高齡換照係數 / F3滾動月數），空白用預設
+function getFairnessConfig() {
+  const def = { weightBcg: 1.5, weightCog: 1.5, rollingMonths: 3 };
+  try {
+    const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
+    const wb = parseFloat(sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_BCG).getValue());
+    const wc = parseFloat(sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_COG).getValue());
+    const rm = parseInt(sheet.getRange(GLOBAL_CONFIG.ROLLING_MONTHS).getValue());
+    return {
+      weightBcg:     (isNaN(wb) || wb < 1) ? def.weightBcg : wb,
+      weightCog:     (isNaN(wc) || wc < 1) ? def.weightCog : wc,
+      rollingMonths: (isNaN(rm) || rm < 1) ? def.rollingMonths : Math.min(rm, 12)
+    };
+  } catch(e) { return def; }
 }
 
 function parseDateFromSheet(dateStr, sheetName) {
@@ -399,8 +468,16 @@ function getDaySchedule(spreadsheet, dateObj, timezone) {
   const rowData = sched.getRange(targetRow, 3, 1, 11).getValues()[0];
   const duties  = [];
   rowData.forEach((val, ci) => {
-    if (val && val.toString().trim())
-      duties.push({ shift: headers[ci] || '', person: val.toString().trim() });
+    if (val && val.toString().trim()) {
+      let shiftName = headers[ci] || '';
+      // ver4.9：L欄（ci=9）依日期翻譯為 卡介苗/高齡換照
+      if (ci === 9) {
+        const lt = getLTypeForDate(dateObj);
+        if (lt === 'COG') shiftName = '高齡換照';
+        else if (lt === 'BCG') shiftName = '卡介苗';
+      }
+      duties.push({ shift: shiftName, person: val.toString().trim() });
+    }
   });
   return { date: dateObj, dateStr, weekDay, duties };
 }
@@ -660,9 +737,10 @@ function getScheduleData(sheetName) {
   } catch(e) {}
 
   // ★ 計算每列是否為假日（供前端 fullPreview 正確標色，含清明等非六日假日）
-  const holidayRows = datesRange.map(row => {
+  //   ver4.9：同時解析每列日期物件，供 L 欄卡介苗/高齡換照類型判定
+  const rowDates = datesRange.map(row => {
     const rawA = row[0];
-    if (!rawA) return false;
+    if (!rawA) return null;
     let d = null;
     if (rawA instanceof Date) { d = rawA; }
     else {
@@ -678,8 +756,12 @@ function getScheduleData(sheetName) {
         }
       }
     }
-    return d ? isHoliday(d) : false;
+    return d;
   });
+  const holidayRows = rowDates.map(d => d ? isHoliday(d) : false);
+  // ver4.9：每列 L 欄業務類型（'BCG'|'COG'|''），前端翻譯顯示名稱/換班選人池用
+  const lTypes = rowDates.map(d => d ? getLTypeForDate(d) : '');
+  const _ymForCog = parseYearMonthFromSheetName(sheetName);
 
   return {
     dates:           combinedDates.map(d => [d]),
@@ -692,7 +774,11 @@ function getScheduleData(sheetName) {
     schedTime:       schedTime,
     reviewStatus:    reviewStatus,
     writeCount:      writeCount,
-    holidayRows:     holidayRows
+    holidayRows:     holidayRows,
+    cogActive:       _ymForCog.valid ? isCognitiveActive(_ymForCog.year, _ymForCog.month) : false,
+    lTypes:          lTypes,
+    bcgStaff:        (function(){ try { return getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME).getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(n=>n&&n.toString().trim()).map(n=>n.toString().trim()); } catch(e){ return []; } })(),
+    cogStaff:        getCogStaffNames()
   };
 }
 
@@ -763,9 +849,25 @@ function setReviewStatus(adminPassword, sheetName, status) {
   } catch(e) { return { success: false, message: e.message }; }
 }
 
-function getShiftOptions(column) {
+// ver4.9：dateStr/sheetName 為選填（L欄需依日期切換 卡介苗Q欄池 / 高齡換照G欄池）
+function getShiftOptions(column, dateStr, sheetName) {
   const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const columnLetter = String.fromCharCode(64 + column);
+
+  // ── L欄（column=12）：依日期判斷業務類型，回傳對應資格池 ──
+  if (column === 12 && dateStr) {
+    const dObj = parseDateFromSheet(dateStr.toString().split(' ')[0], sheetName || '');
+    const lt = dObj ? getLTypeForDate(dObj) : '';
+    if (lt === 'COG') {
+      return { options: getCogStaffNames(), selectType: 'SC', displayName: '高齡換照' };
+    }
+    if (lt === 'BCG') {
+      const opts = sheet.getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(o => o);
+      return { options: opts, selectType: 'SC', displayName: '卡介苗' };
+    }
+    // 非L欄業務日（理論上不會有值）：照舊回傳卡介苗池
+  }
+
   const range = GLOBAL_CONFIG.SHIFT_OPTIONS[columnLetter];
   let options = range ? sheet.getRange(range).getValues().flat().filter(o => o) : [];
   return { options, selectType: GLOBAL_CONFIG.SELECT_TYPE[columnLetter] || 'SC' };
@@ -791,7 +893,14 @@ function updateShift(sheetName, date, shiftColumn, newShifts, sendEmail, empId, 
       // ★ headers 先讀再寫入：寫入成功後不再有任何可 throw 的讀取，
       //   避免「儲存格已改但回報系統錯誤」的部分寫入誤報
       const headers = sheet.getRange('C1:M1').getValues()[0];
-      const shiftType = headers[shiftColumn - 3] || '未知班別';
+      let shiftType = headers[shiftColumn - 3] || '未知班別';
+      // ver4.9：L欄依日期翻譯為 卡介苗/高齡換照，換班紀錄才不會誤導
+      if (shiftColumn === 12) {
+        const dObjL = parseDateFromSheet(date.trim().split(' ')[0], sheetName);
+        const ltL = dObjL ? getLTypeForDate(dObjL) : '';
+        if (ltL === 'COG') shiftType = '高齡換照';
+        else if (ltL === 'BCG') shiftType = '卡介苗';
+      }
       sheet.getRange(row, shiftColumn).setValue(newShift);
       // ★ 部分寫入修正：班表已寫入成功後，日誌寫入失敗不應回報整體失敗
       //   （原本回「系統錯誤」會誤導使用者以為沒換到而重試，卻得到「班別未改變」）
@@ -994,8 +1103,9 @@ function getScheduleChanges(sheetName, preloadedHeaders) {
     // 標頭正規化 map（舊日誌「值班人員」→「值班」等）
     const hdrNormMap = {};
     sheetHdrs.forEach(h => { if (h) hdrNormMap[h] = h; });
-    // 常見舊名稱對應
-    const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援' };
+    // 常見舊名稱對應（ver4.9：L欄日誌記「卡介苗/高齡換照」，標頭為「卡介/換照」）
+    const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援',
+                         '卡介苗':'卡介/換照', '高齡換照':'卡介/換照' };
     Object.keys(LEGACY_HDR).forEach(old => {
       if (!hdrNormMap[old]) hdrNormMap[old] = LEGACY_HDR[old];
     });
@@ -1234,22 +1344,25 @@ function getYearlyClinicStats() {
     const monthly = []; // [{label, sheetName, counts:{name:[]}}]
 
     // ── 週別分欄設定 ─────────────────────────────────────────────────
-    // 原始 E2:L 8欄順序：門診(0)/掛號(1)/前台(2)/預登1(3)/預登2注(4)/注射1(5)/注射2(6)/卡介苗(7)
+    // 原始 E2:L 8欄順序：門診(0)/掛號(1)/前台(2)/預登1(3)/預登2注(4)/注射1(5)/注射2(6)/卡介換照(7)
     // 混合日欄（週二+週四）：idx 0,3,4,5 → 拆成 _二 / _四 兩子欄
     // 週四專屬欄：idx 1,2（掛號/前台）→ 不拆
     // 週二專屬欄：idx 6（注射2）→ 不拆
-    // 卡介苗：idx 7 → 不拆
-    // 輸出 12 欄：[門診(二),門診(四),掛號,前台,預登1(二),預登1(四),預登2注(二),預登2注(四),注射1(二),注射1(四),注射2,卡介苗]
+    // ver4.9 L欄拆兩欄：卡介苗(首週二)→11、高齡換照(其餘週二)→12
+    // 輸出 13 欄：[門診(二),門診(四),掛號,前台,預登1(二),預登1(四),預登2注(二),預登2注(四),注射1(二),注射1(四),注射2,卡介苗,高齡換照]
     const MIX_IDX = new Set([0, 3, 4, 5]); // 需要拆分的原始索引
     const wkMap = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0};
 
-    // 建立 12 欄的 counts 結構
+    // 建立 13 欄的 counts 結構
     const wdCounts = {};
-    nurseNames.forEach(n => { wdCounts[n] = new Array(12).fill(0); });
+    nurseNames.forEach(n => { wdCounts[n] = new Array(13).fill(0); });
+    // ver4.9 雙帳本：資格班分項計數（bcg/cog 全年）＋生效後(9月起)計數（獎勵分基準，不追溯）
+    const bcgCntAll = {}, cogCntAll = {}, bcgCntEff = {}, cogCntEff = {};
+    nurseNames.forEach(n => { bcgCntAll[n]=0; cogCntAll[n]=0; bcgCntEff[n]=0; cogCntEff[n]=0; });
+    const fairCfgStats = getFairnessConfig();
 
-    // 原始欄 idx → 輸出欄 idx 的映射（不分日）
-    // 混合欄 0→[0,1]  單欄 1→2  2→3  混合欄 3→[4,5]  4→[6,7]  5→[8,9]  6→10  7→11
-    function getOutIdx(srcIdx, dow) {
+    // 原始欄 idx → 輸出欄 idx 的映射（L欄需另傳 lType）
+    function getOutIdx(srcIdx, dow, lType) {
       if (srcIdx === 0) return dow === 2 ? 0 : (dow === 4 ? 1 : 0); // 門診
       if (srcIdx === 1) return 2;   // 掛號（週四）
       if (srcIdx === 2) return 3;   // 前台（週四）
@@ -1257,7 +1370,7 @@ function getYearlyClinicStats() {
       if (srcIdx === 4) return dow === 2 ? 6 : (dow === 4 ? 7 : 6); // 預登2注
       if (srcIdx === 5) return dow === 2 ? 8 : (dow === 4 ? 9 : 8); // 注射1
       if (srcIdx === 6) return 10;  // 注射2（週二）
-      if (srcIdx === 7) return 11;  // 卡介苗
+      if (srcIdx === 7) return lType === 'COG' ? 12 : 11;  // 卡介苗 / 高齡換照
       return 0;
     }
 
@@ -1267,29 +1380,59 @@ function getYearlyClinicStats() {
       const lr = sh.getLastRow();
       if (lr < 2) return;
       const maxRow = Math.min(lr, 32);
-      // E到L欄（含卡介苗）= 門診~卡介苗；同時讀 B 欄星期字串
+      // E到L欄（含卡介/換照）；B 欄星期字串；A 欄日期（ver4.9 L欄類型判定用）
       const data    = sh.getRange('E2:L' + maxRow).getValues();
       const wkData  = sh.getRange('B2:B' + maxRow).getValues();
+      const dtData  = sh.getRange('A2:A' + maxRow).getValues();
+      const pSheet  = parseYearMonthFromSheetName(sName);
+      const shYear  = pSheet.valid ? pSheet.year : year;
+      const ymNumS  = pSheet.valid ? (pSheet.year * 100 + pSheet.month) : 0;
 
       const mCounts = {};
       nurseNames.forEach(n => { mCounts[n] = new Array(8).fill(0); });
       const mWdCounts = {};
-      nurseNames.forEach(n => { mWdCounts[n] = new Array(12).fill(0); });
+      nurseNames.forEach(n => { mWdCounts[n] = new Array(13).fill(0); });
+
+      // ver4.9（Codex review #3）：公平帳一律以「原始排班」計數——用換班日誌反推，
+      // 與排班引擎同基準，換班屬個人協調不改變公平統計
+      const origMapY = buildOriginalScheduleMap(sName);
 
       data.forEach((row, ri) => {
         // 解析星期
         const wb  = wkData[ri][0] ? wkData[ri][0].toString() : '';
         const wm  = wb.match(/週([一二三四五六日])/);
         const dow = wm ? (wkMap[wm[1]] !== undefined ? wkMap[wm[1]] : -1) : -1;
+        // 解析日期（L欄卡介苗/高齡換照判定＋原始排班 key）
+        let pd = null;
+        const rawA = dtData[ri][0];
+        if (rawA instanceof Date) pd = rawA;
+        else {
+          const mm2 = rawA ? rawA.toString().match(/(\d+)\/(\d+)/) : null;
+          if (mm2) { try { pd = new Date(shYear, parseInt(mm2[1])-1, parseInt(mm2[2])); } catch(e){} }
+        }
+        const lType = pd ? getLTypeForDate(pd) : '';
+        const dsKey = pd ? ((pd.getMonth()+1) + '/' + pd.getDate()) : '';
 
         for (let ci = 0; ci < 8; ci++) {
-          const val = row[ci] ? row[ci].toString().trim() : '';
+          // E:L 的 ci 0..7 對應班表 colIdx 2..9
+          const cellRaw = row[ci] ? row[ci].toString().trim() : '';
+          const val = (dsKey && origMapY[dsKey + '|' + (ci + 2)]) || cellRaw;
           if (!val || !counts.hasOwnProperty(val)) continue;
           counts[val][ci]++;
           mCounts[val][ci]++;
-          const oi = getOutIdx(ci, dow);
+          const oi = getOutIdx(ci, dow, lType);
           wdCounts[val][oi]++;
           mWdCounts[val][oi]++;
+          // ver4.9：資格班分項計數
+          if (ci === 7) {
+            if (lType === 'COG') {
+              cogCntAll[val]++;
+              if (ymNumS >= COG_EFFECTIVE_YM) cogCntEff[val]++;
+            } else {
+              bcgCntAll[val]++;
+              if (ymNumS >= COG_EFFECTIVE_YM) bcgCntEff[val]++;
+            }
+          }
         }
       });
 
@@ -1434,16 +1577,25 @@ function getYearlyClinicStats() {
       const isActive   = !isResigned;
       const onLeave    = isCurrentlyExcluded(name);
       const joinDateSet = !!jd;
-      return { name, counts: counts[name], total, expected, ratio, inMonths, isActive, isResigned, onLeave, joinM, joinDateSet };
+      // ver4.9 雙帳本：實際班次(total 已含 E~L 全部) + 資格獎勵分（9月起，不追溯）= 公平分數
+      const qualBonus = Math.round(((fairCfgStats.weightBcg - 1) * (bcgCntEff[name]||0)
+                       + (fairCfgStats.weightCog - 1) * (cogCntEff[name]||0)) * 10) / 10;
+      const fairScore = Math.round((total + qualBonus) * 10) / 10;
+      return { name, counts: counts[name], total, expected, ratio, inMonths, isActive, isResigned, onLeave, joinM, joinDateSet,
+               bcgCnt: bcgCntAll[name]||0, cogCnt: cogCntAll[name]||0, qualBonus, fairScore };
     }).sort((a, b) => {
       // 離職人員排到最後，不參與優先比較
       if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      // ver4.9：以公平分數（實際＋資格獎勵）排序，與排班引擎加權基準一致
+      const fa = (a.fairScore !== undefined) ? a.fairScore : a.total;
+      const fb = (b.fairScore !== undefined) ? b.fairScore : b.total;
+      if (fa !== fb) return fa - fb;
       return a.total - b.total; // 在職者少者優先
     });
 
     const passedMonths = scheduledMonthCount; // 已排班月份數
 
-    // 12 欄標頭（週別分欄後的名稱）
+    // 13 欄標頭（週別分欄後的名稱；ver4.9 L欄拆 卡介苗/高齡換照）
     const h = CLINIC_HEADERS;
     const WD_HEADERS = [
       (h[0]||'門診')+'(二)',  (h[0]||'門診')+'(四)',
@@ -1451,13 +1603,13 @@ function getYearlyClinicStats() {
       (h[3]||'預登1')+'(二)', (h[3]||'預登1')+'(四)',
       (h[4]||'預登2注')+'(二)',(h[4]||'預登2注')+'(四)',
       (h[5]||'注射1')+'(二)', (h[5]||'注射1')+'(四)',
-      h[6]||'注射2',           h[7]||'卡介苗'
+      h[6]||'注射2',           '卡介苗',                '高齡換照'
     ];
 
     // 將 wdCounts 轉為 rows 相同格式供前端使用
     const wdRows = rows.map(row => ({
       ...row,
-      wdCounts: wdCounts[row.name] || new Array(12).fill(0),
+      wdCounts: wdCounts[row.name] || new Array(13).fill(0),
       wdTotal:  (wdCounts[row.name] || []).reduce((s,v)=>s+v,0)
     }));
 
@@ -1470,7 +1622,10 @@ function getYearlyClinicStats() {
       monthly,
       nurses:   nurseNames,
       sheets:   yearSheets,
-      passedMonths
+      passedMonths,
+      // ver4.9：公平制度設定（前端看板註記用）
+      fairCfg: fairCfgStats,
+      cogEffective: '2026/9'
     };
   } catch(e) {
     return { success: false, message: e.message, headers:[], rows:[], monthly:[], nurses:[], sheets:[] };
@@ -1576,13 +1731,20 @@ function getSystemSettings() {
         });
       }
     }
+    // ver4.9：高齡換照名單（G欄）＋公平制度設定（F欄）
+    const cogNames = sheet.getRange(GLOBAL_CONFIG.COG_STAFF_RANGE).getValues().flat();
+    const fairCfg  = getFairnessConfig();
     return {
       success: true, staff,
       kkNames:     kkNames.filter(n=>n).map(n=>n.toString().trim()),
       clinicNames: clinicNames.filter(n=>n).map(n=>n.toString().trim()),
       bcgNames:    bcgNames.filter(n=>n).map(n=>n.toString().trim()),
       dutyNames:   dutyNames.filter(n=>n).map(n=>n.toString().trim()),
-      dengueNames: dengueNames.filter(n=>n).map(n=>n.toString().trim())
+      dengueNames: dengueNames.filter(n=>n).map(n=>n.toString().trim()),
+      cogNames:    cogNames.filter(n=>n).map(n=>n.toString().trim()),
+      weightBcg:     fairCfg.weightBcg,
+      weightCog:     fairCfg.weightCog,
+      rollingMonths: fairCfg.rollingMonths
     };
   } catch(e) { return { success: false, message: e.message }; }
 }
@@ -1612,6 +1774,20 @@ function saveSystemSettings(adminPassword, settings) {
     if (settings.bcgNames)    for (let i=0;i<11;i++) sheet.getRange('Q'+(i+1)).setValue(settings.bcgNames[i]||'');
     if (settings.dutyNames)   for (let i=0;i<11;i++) sheet.getRange('E'+(i+1)).setValue(settings.dutyNames[i]||'');
     if (settings.dengueNames) for (let i=0;i<11;i++) sheet.getRange('B'+(i+1)).setValue(settings.dengueNames[i]||'');
+    // ver4.9：高齡換照名單（G1:G8）＋公平制度設定（F1係數卡介苗/F2係數高齡換照/F3滾動月數）
+    if (settings.cogNames) for (let i=0;i<8;i++) sheet.getRange('G'+(i+1)).setValue(settings.cogNames[i]||'');
+    if (settings.weightBcg !== undefined && settings.weightBcg !== '') {
+      const wb = parseFloat(settings.weightBcg);
+      if (!isNaN(wb) && wb >= 1) sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_BCG).setValue(wb);
+    }
+    if (settings.weightCog !== undefined && settings.weightCog !== '') {
+      const wc = parseFloat(settings.weightCog);
+      if (!isNaN(wc) && wc >= 1) sheet.getRange(GLOBAL_CONFIG.QUAL_WEIGHT_COG).setValue(wc);
+    }
+    if (settings.rollingMonths !== undefined && settings.rollingMonths !== '') {
+      const rm = parseInt(settings.rollingMonths);
+      if (!isNaN(rm) && rm >= 1 && rm <= 12) sheet.getRange(GLOBAL_CONFIG.ROLLING_MONTHS).setValue(rm);
+    }
     if (settings.newAdminPwd && settings.newAdminPwd.trim()) sheet.getRange('N2').setValue(settings.newAdminPwd.trim());
     writeOpLog('系統設定', '儲存系統設定');
     return { success: true, message: '系統設定已儲存！' };
@@ -1661,9 +1837,9 @@ function setSuccessor(adminPassword, rowIndex, newStaff) {
     sheet.getRange('Y'+row).setValue('');            // 清離職日
     sheet.getRange('P'+row).setValue(finalPoints);   // 初始點數
 
-    // ── 各候選名單自動將舊名→新名 ────────────────────────────────
+    // ── 各候選名單自動將舊名→新名（ver4.9 含高齡換照 G 欄）────────────
     if (oldName && newStaff.name && oldName !== newStaff.name) {
-      ['K1:K8','J1:J3','E1:E11','Q1:Q11','B1:B11'].forEach(function(r) {
+      ['K1:K8','J1:J3','E1:E11','Q1:Q11','B1:B11','G1:G8'].forEach(function(r) {
         replaceInRange_(sheet, r, oldName, newStaff.name);
       });
     }
@@ -1752,10 +1928,11 @@ function shouldAssignShift(date, colIdx, year, month) {
 
   // 值班/停班2線固定
   if (colIdx === 0 || colIdx === 10) return true;
-  // 卡介苗固定（每月第一個週二工作日）
+  // L欄 卡介/換照：首週二=卡介苗；生效後(2026/9起)其餘工作週二=高齡換照
   if (colIdx === 9) {
     if (holiday || dow !== 2) return false;
-    return date.getDate() === getFirstTuesdayWorkday(year, month);
+    if (date.getDate() === getFirstTuesdayWorkday(year, month)) return true;  // 卡介苗日
+    return isCognitiveActive(year, month);  // 其餘週二：生效後排高齡換照
   }
   if (holiday) return false;
 
@@ -1888,6 +2065,11 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const shiftHdrs = sheet.getRange('C1:M1').getValues()[0].map(v => v ? v.toString().trim() : '');
     const shiftStaffMap = getShiftStaffMap();
     const cols = ['C','D','E','F','G','H','I','J','K','L','M'];
+
+    // ★ ver4.9：公平制度設定＋高齡換照候選名單（G欄）
+    const fairCfg   = getFairnessConfig();
+    const cogNames  = getCogStaffNames();
+    const cogActive = isCognitiveActive(year, month);
 
     const datesRange   = sheet.getRange('A2:B32').getValues();
     const existingData = sheet.getRange('C2:M32').getValues();
@@ -2136,91 +2318,105 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       staff.forEach(s => { assignCount[idx][s.name] = 0; });
     });
 
-    // ── 全年累積計數（門診系列 colIdx 2-8）──────────────────────────
-    // 「真正的新到職者」先宣告（carry=0），try block 內才賦值，確保後續所有邏輯可存取
-    const trulyNewStaff = new Set();
-    // ★ 週二/週四分開計數器（宣告在 try 外，確保全函式可用）
+    // ── ver4.9 歷史累積計數：改「滾動近N個月」視窗（預設3，F3可調）────
+    // ①視窗內各欄/週別次數：供欄內輪序（sort ④）
+    // ②滾動加權公平分：EK每次+1、卡介苗+Wb、高齡換照+Wc（2026/9起，不追溯），
+    //   除以視窗內在職月數 → rollingAvgFair（sort ③，取代原「跨年累積總量」，
+    //   修掉新人因累積=0被系統性超排的隱性補償）
+    // ③一律以「原始排班」計數：用換班日誌反推（buildOriginalScheduleMap），
+    //   換班屬個人協調不進公平帳
     const TUE_THU_CIS = new Set([2, 5, 6, 7]);
     const assignCountTue = {}; // 會在 try 內初始化
     const assignCountThu = {};
+    const histFair     = {};   // 視窗內加權公平分累計
+    const histMonths   = {};   // 視窗內在職月數
+    const cogHistCount = {};   // 視窗內高齡換照次數（COG 輪序用）
+    const rollingAvgFair = {}; // 每在職月平均公平分（sort ③）
+    staff.forEach(s => { histFair[s.name]=0; histMonths[s.name]=0; cogHistCount[s.name]=0; rollingAvgFair[s.name]=0; });
 
     try {
-      const allSheets = spreadsheet.getSheets().map(s => s.getName());
-      const rocYear   = year - 1911;
-      const prefix    = rocNumToStr(rocYear) + '年';
-      // ★ 修正 BUG 7：只累積「本月之前」已排月份的門診次數。
-      //   原本掃「所有其他月份」（含未來月），導致第2次排班時1月能看到2-12月資料，
-      //   打亂優先序 → 整年排班 vs 單月連排結果不一致，且多次重排結果不同。
-      //   修正後：以 year/month 為界，只看已過去的月份，算法穩定可重複。
-      const yearSheets = allSheets.filter(n => {
-        if (n === EMAIL_SHEET_NAME || !n.includes(prefix) || n === sheetName) return false;
-        const pm = parseYearMonthFromSheetName(n);
-        // 只取同年、月份嚴格小於當前排班月的工作表
-        return pm.valid && pm.year === year && pm.month < month;
-      });
-      const cliHeaders = [null, null, 'E','F','G','H','I','J','K', null, null]; // colIdx 2-8
+      // ── 建立滾動視窗月份清單（可跨年）─────────────────────────────
+      const rocMonthsArr = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
+      const windowMonths = [];
+      for (let k = 1; k <= fairCfg.rollingMonths; k++) {
+        let mm = month - k, yy = year;
+        while (mm < 1) { mm += 12; yy -= 1; }
+        windowMonths.push({ y: yy, m: mm,
+          name: rocNumToStr(yy - 1911) + '年' + rocMonthsArr[mm] + '月班表' });
+      }
 
-      // ★ 週二/週四分開計數器初始化（TUE_THU_CIS 宣告於 try 外）
+      // ★ 週二/週四分開計數器初始化
       TUE_THU_CIS.forEach(ci => {
         assignCountTue[ci] = {}; assignCountThu[ci] = {};
         staff.forEach(s => { assignCountTue[ci][s.name] = 0; assignCountThu[ci][s.name] = 0; });
       });
 
-      // ★ 效能優化：批次取得所有工作表物件，避免重複 getSheetByName
+      // ★ 效能：批次取得所有工作表物件
       const allSheetsMap = {};
       spreadsheet.getSheets().forEach(sh => { allSheetsMap[sh.getName()] = sh; });
 
-      yearSheets.forEach(sn => {
-        const s = allSheetsMap[sn];
+      windowMonths.forEach(wm => {
+        const s = allSheetsMap[wm.name];
         if (!s) return;
         const lr = s.getLastRow();
         if (lr < 2) return;
         const maxRow = Math.min(lr, 32);
-        // 一次讀 B2:K(maxRow)：B=星期字串, C-D跳過, E-K=門診資料(偏移調整)
-        // 改為分兩欄：B欄(星期) + E:K(門診)
-        const weekdayCol = s.getRange('B2:B' + maxRow).getValues(); // 星期字串
-        const data       = s.getRange('E2:K' + maxRow).getValues(); // 門診欄
-        const wkMap2 = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0};
-        data.forEach((row, ri) => {
-          // 從 B 欄星期字串直接取 dow（快，不 new Date）
-          let dow = -1;
-          const wb = weekdayCol[ri][0] ? weekdayCol[ri][0].toString() : '';
-          const wm = wb.match(/週([一二三四五六日])/);
-          if (wm && wkMap2[wm[1]] !== undefined) dow = wkMap2[wm[1]];
+        // 視窗內在職月數（滾動平均分母）
+        staff.forEach(st => { if (isStaffActiveForMonth(st, wm.y, wm.m)) histMonths[st.name]++; });
 
+        const origMap  = buildOriginalScheduleMap(wm.name);  // 換班日誌反推原始排班
+        const dateCol  = s.getRange('A2:A' + maxRow).getValues();
+        const data     = s.getRange('E2:L' + maxRow).getValues(); // E..L = ci 2..9
+        const ymNum    = wm.y * 100 + wm.m;
+
+        data.forEach((row, ri) => {
+          // 解析該列日期（原始排班反推需要 M/d key；dow 直接取自日期）
+          const rawA = dateCol[ri][0];
+          let pd = null;
+          if (rawA instanceof Date) pd = rawA;
+          else {
+            const mm2 = rawA ? rawA.toString().match(/(\d+)\/(\d+)/) : null;
+            if (mm2) { try { pd = new Date(wm.y, parseInt(mm2[1])-1, parseInt(mm2[2])); } catch(e){} }
+          }
+          if (!pd) return;
+          const dateStr = Utilities.formatDate(pd, tz, 'M/d');
+          const dow = pd.getDay();
+
+          // ── E~K（ci 2-8）：原始排班計數 ──
           for (let ci = 2; ci <= 8; ci++) {
-            const val = row[ci - 2] ? row[ci - 2].toString().trim() : '';
+            const cellVal = row[ci - 2] ? row[ci - 2].toString().trim() : '';
+            const val = origMap[dateStr + '|' + ci] || cellVal;
             if (!val || !assignCount[ci].hasOwnProperty(val)) continue;
             assignCount[ci][val]++;
+            histFair[val] += 1;
             if (TUE_THU_CIS.has(ci)) {
               if (dow === 2) assignCountTue[ci][val] = (assignCountTue[ci][val]||0) + 1;
               if (dow === 4) assignCountThu[ci][val] = (assignCountThu[ci][val]||0) + 1;
             }
           }
+
+          // ── L欄（ci 9）：卡介苗/高齡換照 加權（2026/9起生效，不追溯）──
+          const lCell = row[7] ? row[7].toString().trim() : '';
+          const lVal  = origMap[dateStr + '|9'] || lCell;
+          if (lVal && histFair.hasOwnProperty(lVal) && ymNum >= COG_EFFECTIVE_YM) {
+            const lt = getLTypeForDate(pd);
+            if (lt === 'COG') {
+              cogHistCount[lVal] = (cogHistCount[lVal]||0) + 1;
+              histFair[lVal] += fairCfg.weightCog;
+            } else if (lt === 'BCG') {
+              histFair[lVal] += fairCfg.weightBcg;
+            }
+          }
         });
       });
 
-      // ── 記錄「真正的新到職者」（carry 全為 0 的人，補基準前偵測）──
-      {
-        const clinicCiList2 = [2,3,4,5,6,7,8];
-        Object.keys(assignCount[2] || {}).forEach(n => {
-          // BUG 10 修正：運算子優先序 || 低於 +，必須加括號確保正確累加
-          const total0 = clinicCiList2.reduce((s,ci2)=>((assignCount[ci2]||{})[n]||0)+s, 0);
-          if (total0 === 0) trulyNewStaff.add(n);
-        });
-      }
-
-      // ── 新到職者補齊積分（全局總量基準，平均分配各欄）─────────────
-      // 用「全局門診總次數」的平均作為基準，再均分到各欄
-      // 避免 per-column 為 0 但 total 卻偏低，導致新人月月補過頭
-      const totalMonths  = 12;
-      const passedMonths = Math.max(month - 1, 0); // 排本月時，已過去的月數
-      // ★ 門診自動代償已移除：改為在前端統計面板顯示差異備註，不影響排班計數
-      // ── 建立全局總次數 totalClinicCount（所有門診系列 ci=2-8 合計）──────
-      //    用來在次數不均時以「總量」優先均衡，防止per-column偏差疊加
-      // 注意：這僅用於 sort 的第一層，不改變 assignCount 的各欄統計
+      // ── 滾動平均公平分（sort ③ 基準；無在職月則 0）─────────────────
+      staff.forEach(st => {
+        rollingAvgFair[st.name] = histMonths[st.name] > 0
+          ? histFair[st.name] / histMonths[st.name] : 0;
+      });
     } catch(e) {
-      Logger.log('[runAutoSchedule] 全年累積計數失敗: ' + e.message);
+      Logger.log('[runAutoSchedule] 滾動視窗累積計數失敗: ' + e.message);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -2233,7 +2429,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const qCandNames = shiftStaffMap['L'] || [];
     for (let r = 0; r < dateObjByRow.length; r++) {
       const d = dateObjByRow[r];
-      if (!d || !shouldAssignShift(d, 9, year, month)) continue;
+      // ver4.9：L欄已與高齡換照共用，pre-pass 只認「卡介苗日」（首個工作週二）
+      if (!d || getLTypeForDate(d) !== 'BCG') continue;
       // 找到卡介苗日
       bcgDateKey = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
 
@@ -2291,6 +2488,11 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     // ── 本月門診次數計數器（用於月內上限）────────────────────────────
     const monthlyClinicCount = {};
     staff.forEach(s => { monthlyClinicCount[s.name] = 0; });
+    // ★ ver4.9：本月資格班計數（高齡換照每人每月上限2次）＋本月資格加權分
+    //   月內公平分數 = monthlyClinicCount + monthlyQualScore（雙帳本：一般班1分、資格班W分）
+    const monthlyCogCount  = {};
+    const monthlyQualScore = {};
+    staff.forEach(s => { monthlyCogCount[s.name] = 0; monthlyQualScore[s.name] = 0; });
     // ★ 本月每欄次數計數器（每人每欄每月不可超過 2 次）
     const monthlyCountPerCi = {};
     for (let ci3 = 2; ci3 <= 8; ci3++) {
@@ -2322,7 +2524,17 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         for (let ci = 2; ci <= 10; ci++) {
           const val = existingData[r][ci] ? existingData[r][ci].toString().trim() : '';
           if (!val) continue;
-          if (ci === 9) bcgByDate[dk] = val;
+          if (ci === 9) {
+            bcgByDate[dk] = val;
+            // ver4.9：還原 L 欄資格班月計數與加權分（依日期判斷卡介苗/高齡換照）
+            const lt9 = getLTypeForDate(d);
+            if (lt9 === 'COG') {
+              if (monthlyCogCount.hasOwnProperty(val))  monthlyCogCount[val]++;
+              if (monthlyQualScore.hasOwnProperty(val)) monthlyQualScore[val] += fairCfg.weightCog;
+            } else if (lt9 === 'BCG' && monthlyQualScore.hasOwnProperty(val)) {
+              monthlyQualScore[val] += fairCfg.weightBcg;
+            }
+          }
           if (assignCount[ci] && assignCount[ci].hasOwnProperty(val)) {
             assignCount[ci][val]++;
             // ★ 不覆蓋模式下，恢復週二/週四分開計數
@@ -2449,26 +2661,77 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           kkPtr = nextPtr;
 
         // ────────────────────────────────────────────────────────────
-        // 卡介苗(9)：動態 Q欄，奇偶月優先，排除遞補
+        // 卡介/換照(9)：首週二=卡介苗(Q欄嚴格輪序)、其餘週二=高齡換照(G欄資格池)
         // ────────────────────────────────────────────────────────────
         } else if (ci === 9) {
-          const qPool = staff.filter(s =>
-            cNames.includes(s.name) &&
-            !isPersonExcluded(s.name, d, exclusions, year)
-          );
-          if (qPool.length === 0) { rowRes[9] = ''; continue; }
-          qPool.sort((a, b) => {
-            const diff = (assignCount[9][a.name]||0) - (assignCount[9][b.name]||0);
-            if (diff !== 0) return diff;
-            const aIdx = cNames.indexOf(a.name);
-            const bIdx = cNames.indexOf(b.name);
-            return month % 2 === 1 ? bIdx - aIdx : aIdx - bIdx;
-          });
-          const chosen = qPool[0].name;
-          rowRes[9] = chosen;
-          assignCount[9][chosen] = (assignCount[9][chosen]||0) + 1;
-          bcgByDate[dk] = chosen;
-          clinicAssigned.add(chosen); // ★ 記入門診不重複集合
+          const lType = getLTypeForDate(d);
+          if (lType === 'COG') {
+            // ── 高齡換照：G欄5人資格池，獨立輪序＋雙帳本公平分 ──
+            const cogPool = cogNames
+              .map((name, cogIdx) => {
+                const s2 = staff.find(x => x.name === name);
+                return s2 ? { ...s2, cogIdx } : null;
+              })
+              .filter(s2 => s2 &&
+                !isPersonExcluded(s2.name, d, exclusions, year) &&
+                !clinicAssigned.has(s2.name)
+              );
+            if (cogPool.length === 0) { rowRes[9] = ''; continue; }
+            // 每人每月上限 2 次（全員滿額才放寬）
+            const cogCapped = cogPool.filter(p => (monthlyCogCount[p.name]||0) < 2);
+            const cogEp = cogCapped.length > 0 ? cogCapped : cogPool;
+            cogEp.sort((a, b) => {
+              // ① 本月高齡換照次數少者優先
+              const ma = monthlyCogCount[a.name]||0, mb = monthlyCogCount[b.name]||0;
+              if (ma !== mb) return ma - mb;
+              // ② 本月公平分數少者優先（一般班1分＋資格班W分）
+              const fa = (monthlyClinicCount[a.name]||0) + (monthlyQualScore[a.name]||0);
+              const fb = (monthlyClinicCount[b.name]||0) + (monthlyQualScore[b.name]||0);
+              if (fa !== fb) return fa - fb;
+              // ③ 滾動視窗高齡換照次數少者優先（跨月輪序）
+              const ha = cogHistCount[a.name]||0, hb = cogHistCount[b.name]||0;
+              if (ha !== hb) return ha - hb;
+              // ④ 滾動平均公平分少者優先
+              const ra = rollingAvgFair[a.name]||0, rb = rollingAvgFair[b.name]||0;
+              if (Math.abs(ra - rb) > 1e-9) return ra - rb;
+              // ⑤ G欄順位輪轉（月＋列相位，避免固定同一人先被選）
+              const plen = Math.max(cogNames.length, 1);
+              const phase = (month + rowIdx) % plen;
+              return ((a.cogIdx - phase + plen) % plen) - ((b.cogIdx - phase + plen) % plen);
+            });
+            const chosen = cogEp[0].name;
+            rowRes[9] = chosen;
+            monthlyCogCount[chosen]  = (monthlyCogCount[chosen]||0) + 1;
+            cogHistCount[chosen]     = (cogHistCount[chosen]||0) + 1;
+            monthlyQualScore[chosen] = (monthlyQualScore[chosen]||0) + fairCfg.weightCog;
+            clinicAssigned.add(chosen); // 同日不得再排其他門診關卡
+          } else {
+            // ── 卡介苗（首週二）：pre-pass 嚴格 ABC 輪序優先（與排除邏輯/成功訊息一致）──
+            let chosen = '';
+            if (bcgPersonThisMonth && dk === bcgDateKey &&
+                !clinicAssigned.has(bcgPersonThisMonth)) {
+              chosen = bcgPersonThisMonth;
+            } else {
+              const qPool = staff.filter(s =>
+                cNames.includes(s.name) &&
+                !isPersonExcluded(s.name, d, exclusions, year)
+              );
+              if (qPool.length === 0) { rowRes[9] = ''; continue; }
+              qPool.sort((a, b) => {
+                const diff = (assignCount[9][a.name]||0) - (assignCount[9][b.name]||0);
+                if (diff !== 0) return diff;
+                const aIdx = cNames.indexOf(a.name);
+                const bIdx = cNames.indexOf(b.name);
+                return month % 2 === 1 ? bIdx - aIdx : aIdx - bIdx;
+              });
+              chosen = qPool[0].name;
+            }
+            rowRes[9] = chosen;
+            assignCount[9][chosen] = (assignCount[9][chosen]||0) + 1;
+            monthlyQualScore[chosen] = (monthlyQualScore[chosen]||0) + fairCfg.weightBcg;
+            bcgByDate[dk] = chosen;
+            clinicAssigned.add(chosen); // ★ 記入門診不重複集合
+          }
 
         // ────────────────────────────────────────────────────────────
         // 門診系列(2-8)：次數均勻，排除遞補
@@ -2539,15 +2802,17 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             const mcb = getPerCiDay(b.name);
             if (mca !== mcb) return mca - mcb;
 
-            // ② 月內總次數少者優先（次要：月內均衡，max-min≤1）
-            const mthA = monthlyClinicCount[a.name] || 0;
-            const mthB = monthlyClinicCount[b.name] || 0;
-            if (mthA !== mthB) return mthA - mthB;
+            // ② 月內公平分數少者優先（ver4.9 雙帳本：一般班1分＋資格班W分）
+            //   資格者站了卡介苗/高齡換照 → 分數已計入 → 自動少排一般關卡（受訓獎勵）
+            const mthA = (monthlyClinicCount[a.name] || 0) + (monthlyQualScore[a.name] || 0);
+            const mthB = (monthlyClinicCount[b.name] || 0) + (monthlyQualScore[b.name] || 0);
+            if (Math.abs(mthA - mthB) > 1e-9) return mthA - mthB;
 
-            // ③ 跨月歷史總次數少者優先（補償）
-            const ta = totalClinicCount[a.name] || 0;
-            const tb = totalClinicCount[b.name] || 0;
-            if (ta !== tb) return ta - tb;
+            // ③ 滾動近N個月每在職月平均公平分少者優先（ver4.9）
+            //   取代原「跨年累積總量」：新人不再因累積=0被系統性超排
+            const ta = rollingAvgFair[a.name] || 0;
+            const tb = rollingAvgFair[b.name] || 0;
+            if (Math.abs(ta - tb) > 1e-9) return ta - tb;
 
             // ④ 週二/週四分開輪序
             let ca, cb;
@@ -2779,6 +3044,14 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       sheet.getRange('A2:A32').setNumberFormat('@');
       sheet.getRange('C2:M32').setValues(result);
 
+      // ★ ver4.9：高齡換照生效後，L1 標題自動更新為「卡介/換照」（舊表可能仍是「卡介苗」）
+      if (cogActive) {
+        try {
+          const l1 = (sheet.getRange('L1').getValue() || '').toString().trim();
+          if (l1 === '卡介苗') sheet.getRange('L1').setValue('卡介/換照');
+        } catch(e) {}
+      }
+
       // ★ 記錄系統排定時間到 N1 備註（保留原有審核狀態 + 累加版次）
       const schedTimeStr = Utilities.formatDate(new Date(), spreadsheet.getSpreadsheetTimeZone(), 'yyyy/MM/dd HH:mm');
       let existingReview = '';
@@ -2822,7 +3095,15 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       });
     }
 
-    const successMsg = `${sheetName} 排班完成！（${year}年${month}月，共 ${result.length} 天，卡介苗：${bcgPersonThisMonth||'未定'}）`;
+    // ver4.9：成功訊息加高齡換照資訊
+    let cogMsg = '';
+    if (cogActive) {
+      const cogDays = dateObjByRow.filter(d => d && getLTypeForDate(d) === 'COG').length;
+      cogMsg = cogNames.length === 0
+        ? '，⚠️ 高齡換照名單未設定（班表設定 G1:G8）'
+        : `，高齡換照：${cogDays} 班`;
+    }
+    const successMsg = `${sheetName} 排班完成！（${year}年${month}月，共 ${result.length} 天，卡介苗：${bcgPersonThisMonth||'未定'}${cogMsg}）`;
     writeOpLog('自動排班', successMsg);
     // ★ 回傳哪些列是假日，讓前端正確標色
     const holidayRows = dateObjByRow.map(d => d ? isHoliday(d) : false);
@@ -2832,6 +3113,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       const col2 = cols[ci];
       (shiftStaffMap[col2] || []).forEach(n => { if(n) clinicStaffSet.add(n.toString().trim()); });
     }
+    // ★ ver4.9：每列 L 欄業務類型（'BCG'|'COG'|''），供前端翻譯名稱/選人池
+    const lTypes = dateObjByRow.map(d => d ? getLTypeForDate(d) : '');
     return {
       success: true,
       message: successMsg,
@@ -2841,7 +3124,11 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       holidayRows,
       dengSwapped:     Array.from(dengSwappedRows),
       dengSwapDateMap: dengSwapDateMap,
-      clinicStaff:     Array.from(clinicStaffSet)
+      clinicStaff:     Array.from(clinicStaffSet),
+      cogActive:       cogActive,
+      lTypes:          lTypes,
+      bcgStaff:        (shiftStaffMap['L'] || []).filter(Boolean),
+      cogStaff:        cogNames
     };
 
   } catch(e) {
@@ -3763,7 +4050,18 @@ function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
       const shifts = [];
       for (let ci = 2; ci < 13; ci++) {
         const val = row[ci] ? row[ci].toString().trim() : '';
-        if (val) shifts.push({ header: headers[ci], value: val });
+        if (!val) continue;
+        let hdr = headers[ci];
+        // ver4.9：L欄（試算表第12欄=index 11）依日期翻譯 卡介苗/高齡換照
+        if (ci === 11) {
+          const dObj = row[0] instanceof Date ? row[0] : parseDateFromSheet(dateStr, sName);
+          if (dObj) {
+            const lt = getLTypeForDate(dObj);
+            if (lt === 'COG') hdr = '高齡換照';
+            else if (lt === 'BCG') hdr = '卡介苗';
+          }
+        }
+        shifts.push({ header: hdr, value: val });
       }
       results.push({ sheetName: sName, dateStr, weekStr, fullDate, shifts });
     });
@@ -3785,6 +4083,8 @@ const LINE_SHIFT_STYLE = {
   '預注1':     { icon: '💉', color: '#F39C12' },
   '預注2':     { icon: '💉', color: '#F39C12' },
   '卡介苗':    { icon: '🩹', color: '#E74C3C' },
+  '高齡換照':  { icon: '🚗', color: '#16A085' },
+  '卡介/換照': { icon: '🩹', color: '#E74C3C' },
   '登革熱二線':{ icon: '🦟', color: '#8E44AD' }
 };
 
@@ -4678,7 +4978,8 @@ function buildOriginalScheduleMap(prevSheetName) {
     // bug #22: 與 getScheduleChanges 對齊 — 舊日誌可能寫「值班人員/登革熱二線/協助掛號」，
     // 新 header 為「值班/停班2線/支援」。原本只用 hdrs.indexOf 直接比對拿不到，
     // origMap 缺值 → autoValidateSchedule Check 1 跨月輪序誤判。
-    const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援' };
+    const LEGACY_HDR = { '值班人員':'值班', '登革熱二線':'停班2線', '協助掛號':'支援',
+                         '卡介苗':'卡介/換照', '高齡換照':'卡介/換照' };
     const resolveHdrIdx = (name) => {
       let ci = hdrs.indexOf(name);
       if (ci !== -1) return ci;
@@ -4756,7 +5057,7 @@ function autoValidateSchedule(sheetName) {
       return null;
     }
 
-    // 收集本月每天資料 { date, isHol, duty(C=idx2), deng(M=idx12), kk(D=idx3) }
+    // 收集本月每天資料 { date, isHol, duty(C=idx2), deng(M=idx12), kk(D=idx3), lVal(L=idx11) }
     const curRows = curData.map(r => {
       const d = parseDate(r[0]);
       if (!d) return null;
@@ -4767,6 +5068,9 @@ function autoValidateSchedule(sheetName) {
         duty: (r[2] || '').toString().trim(),   // C欄 值班
         kk:   (r[3] || '').toString().trim(),   // D欄 協助掛號
         deng: (r[12]|| '').toString().trim(),   // M欄 停班2線
+        lVal: (r[11]|| '').toString().trim(),   // L欄 卡介/換照（ver4.9）
+        lType: getLTypeForDate(d),              // 'BCG'|'COG'|''
+        row:  r
       };
     }).filter(Boolean);
 
@@ -4914,6 +5218,18 @@ function autoValidateSchedule(sheetName) {
       }
     });
 
+    // ★ ver4.9：生效後（2026/9起）門診公平度改用「加權公平分數」
+    //   L欄資格班計入：卡介苗×Wb、高齡換照×Wc（雙帳本制，與排班引擎同基準）
+    const cogActiveV = isCognitiveActive(year, month);
+    const fairCfgV   = getFairnessConfig();
+    if (cogActiveV) {
+      curRows.forEach(r => {
+        if (!r.lVal || clinicTotal[r.lVal] === undefined) return;
+        if (r.lType === 'COG')      clinicTotal[r.lVal] += fairCfgV.weightCog;
+        else if (r.lType === 'BCG') clinicTotal[r.lVal] += fairCfgV.weightBcg;
+      });
+    }
+
     // 值班 / 停班2線 計數（從 curRows 直接取，來源已正確）
     curRows.forEach(r => {
       if (r.duty && dutyWd[r.duty] !== undefined) {
@@ -4936,17 +5252,54 @@ function autoValidateSchedule(sheetName) {
       if (maxV - minV > maxAllowed * 2) {
         const maxN = active.find(([,v])=>v===maxV)[0];
         const minN = active.find(([,v])=>v===minV)[0];
+        const fmtV = v => Math.round(v * 10) / 10;  // ver4.9 加權後可能有小數
         errors.push({ check: 4,
-          msg: `【${label}】最多「${maxN}」${maxV}次 vs 最少「${minN}」${minV}次，差距 ${maxV-minV} 次（超過允許的 ±${maxAllowed}）`
+          msg: `【${label}】最多「${maxN}」${fmtV(maxV)}次 vs 最少「${minN}」${fmtV(minV)}次，差距 ${fmtV(maxV-minV)} 次（超過允許的 ±${maxAllowed}）`
         });
       }
     }
 
-    fairCheckT('門診合計',   clinicTotal, 2);
+    fairCheckT(cogActiveV ? '門診公平分(含資格加權)' : '門診合計', clinicTotal, 2);
     fairCheckT('值班平日',   dutyWd,      1);
     fairCheckT('值班假日',   dutyHol,     1);
     fairCheckT('停班2線平日', dengWd,     2);
     fairCheckT('停班2線假日', dengHol,    2);
+
+    // ════════════════════════════════════════════════════════════════
+    // 檢查 5（ver4.9）：卡介/換照欄位規則
+    //   首週二=卡介苗（Q欄3人池）、其餘週二=高齡換照（G欄5人池，2026/9起）
+    //   非業務日不應有值；當日不得兼任 E~K 其他門診關卡
+    // ════════════════════════════════════════════════════════════════
+    const bcgPoolV = check4Sheet.getRange('Q1:Q11').getValues().flat().map(String).map(s=>s.trim()).filter(Boolean);
+    const cogPoolV = check4Sheet.getRange(GLOBAL_CONFIG.COG_STAFF_RANGE).getValues().flat().map(String).map(s=>s.trim()).filter(Boolean);
+    if (cogActiveV) curRows.forEach(r => {
+      if (!r.lVal) {
+        // 生效後的高齡換照日空班提示（非致命：可能名單未設定或全員排除）
+        if (r.lType === 'COG' && cogPoolV.length === 0) {
+          errors.push({ check: 5, msg: `【高齡換照】${r.ds} 空班：候選名單未設定（班表設定 G1:G8）`, ds: r.ds });
+        }
+        return;
+      }
+      if (r.lType === '') {
+        errors.push({ check: 5, msg: `【卡介/換照】${r.ds} 非業務日（非工作週二）不應有「${r.lVal}」`, ds: r.ds });
+        return;
+      }
+      if (r.lType === 'BCG' && bcgPoolV.length && bcgPoolV.indexOf(r.lVal) === -1) {
+        errors.push({ check: 5, msg: `【卡介苗】${r.ds}「${r.lVal}」不在卡介苗資格名單（Q欄）`, ds: r.ds });
+      }
+      if (r.lType === 'COG' && cogPoolV.length && cogPoolV.indexOf(r.lVal) === -1) {
+        errors.push({ check: 5, msg: `【高齡換照】${r.ds}「${r.lVal}」不在高齡換照資格名單（G欄）`, ds: r.ds });
+      }
+      // 當日不得兼任 E~K 其他門診關卡（A2:M32 index 4~10）
+      for (let idx = 4; idx <= 10; idx++) {
+        const nm = (r.row[idx]||'').toString().trim();
+        if (nm && nm === r.lVal) {
+          const lbl = r.lType === 'COG' ? '高齡換照' : '卡介苗';
+          errors.push({ check: 5, msg: `【${lbl}】${r.ds}「${r.lVal}」同日兼任其他門診關卡（不允許）`, ds: r.ds });
+          break;
+        }
+      }
+    });
 
     // ver4.7：讀 M 欄 swap note + N1 dengSwapRows，提供前端展示「本月系統挪移」說明
     const dengSwapInfo = [];
@@ -5028,6 +5381,12 @@ function autoValidateSchedule(sheetName) {
       if (e.check === 3) {
         return !!(manualChanges[(e.ds||'')+'|值班'] || manualChanges[(e.ds||'')+'|停班2線']);
       }
+      // check 5（ver4.9）：L欄被人工挪移 → 視為提示非失誤
+      if (e.check === 5) {
+        return !!(manualChanges[(e.ds||'')+'|卡介/換照'] ||
+                  manualChanges[(e.ds||'')+'|卡介苗'] ||
+                  manualChanges[(e.ds||'')+'|高齡換照']);
+      }
       return false;
     };
     const _isNoticeOnly = function(e) {
@@ -5044,17 +5403,23 @@ function autoValidateSchedule(sheetName) {
         notices: noticeErrs.filter(e => e.check === checkN).map(e => e.msg)
       };
     }
-    const c1 = _bucket(1), c2 = _bucket(2), c3 = _bucket(3), c4 = _bucket(4);
+    const c1 = _bucket(1), c2 = _bucket(2), c3 = _bucket(3), c4 = _bucket(4), c5 = _bucket(5);
+
+    const checksArr = [
+      { id: 1, label: '跨月輪序接續',   pass: c1.real.length === 0, errors: c1.real, notices: c1.notices },
+      { id: 2, label: '連續同人班次',   pass: c2.real.length === 0, errors: c2.real, notices: c2.notices },
+      { id: 3, label: '值班/停班2線衝突', pass: c3.real.length === 0, errors: c3.real, notices: c3.notices },
+      { id: 4, label: '門診公平度(±2)',  pass: c4.real.length === 0, errors: c4.real, notices: c4.notices },
+    ];
+    // ver4.9：高齡換照生效後才顯示 L 欄檢查項
+    if (cogActiveV) {
+      checksArr.push({ id: 5, label: '卡介/換照欄位', pass: c5.real.length === 0, errors: c5.real, notices: c5.notices });
+    }
 
     return {
       success: true,
       sheetName,
-      checks: [
-        { id: 1, label: '跨月輪序接續',   pass: c1.real.length === 0, errors: c1.real, notices: c1.notices },
-        { id: 2, label: '連續同人班次',   pass: c2.real.length === 0, errors: c2.real, notices: c2.notices },
-        { id: 3, label: '值班/停班2線衝突', pass: c3.real.length === 0, errors: c3.real, notices: c3.notices },
-        { id: 4, label: '門診公平度(±2)',  pass: c4.real.length === 0, errors: c4.real, notices: c4.notices },
-      ],
+      checks: checksArr,
       allPass: realErrors.length === 0,
       totalErrors: realErrors.length,
       totalNotices: noticeErrs.length,
@@ -5569,22 +5934,32 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
     // ★ 修正：先收集新紀錄，最後一次 setValues 批次寫回。
     //   原逐筆 setValue 寫法在日誌區滿載時 logRow 被封頂在 460，同批多筆會互相覆蓋只剩最後一筆；
     //   批次寫回改為「既有＋新增，保留最新 421 筆」（滿載時最舊的被擠掉），且寫入次數 N 次 → 1 次。
+    // ver4.9：L欄「卡介/換照」依日期翻譯為 卡介苗/高齡換照，日誌才可正確反推與顯示
+    const _lHdrFix = (hdr, dateStr) => {
+      if (hdr !== '卡介/換照' && hdr !== '卡介苗') return hdr;
+      const dObj = parseDateFromSheet((dateStr||'').split(' ')[0], sheetName);
+      if (!dObj) return hdr;
+      const lt = getLTypeForDate(dObj);
+      return lt === 'COG' ? '高齡換照' : lt === 'BCG' ? '卡介苗' : hdr;
+    };
     const newEntries = [];
     (logs || []).forEach(log => {
       const remarkStr = log.reason ? ' 備註:' + log.reason.trim() : '';
       const prefix = log.isAudit ? `審核-${arrangerName}` : `排班-${arrangerName}`;
       const d1 = (log.date||'').split(' ')[0];
+      const h1 = _lHdrFix(log.header, log.date);
       if(log.oldName !== log.newName){
-        const key1 = `${prefix} ${d1} ${log.header} 原${log.oldName||'–'}→新${log.newName||'–'}`;
+        const key1 = `${prefix} ${d1} ${h1} 原${log.oldName||'–'}→新${log.newName||'–'}`;
         if(!existingKeys.has(key1)){
           newEntries.push(`${key1} 更換時間: ${ts}${remarkStr}`);
           existingKeys.add(key1);
         }
       }
       const d2 = (log.date2||'').split(' ')[0];
+      const h2 = _lHdrFix(log.header2, log.date2);
       if(log.date2 && log.header2 && log.oldName2 !== log.newName2 &&
          !(d1===d2 && log.header===log.header2)){
-        const key2 = `${prefix} ${d2} ${log.header2} 原${log.oldName2||'–'}→新${log.newName2||'–'}`;
+        const key2 = `${prefix} ${d2} ${h2} 原${log.oldName2||'–'}→新${log.newName2||'–'}`;
         if(!existingKeys.has(key2)){
           newEntries.push(`${key2} 更換時間: ${ts}${remarkStr}`);
           existingKeys.add(key2);
@@ -5624,6 +5999,15 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
 
     sheet.getRange('A2:A32').setNumberFormat('@');
     sheet.getRange(2, 3, rows.length, 11).setValues(rows); // C2:M(2+n)
+
+    // ★ ver4.9：高齡換照生效後，L1 標題自動更新為「卡介/換照」
+    try {
+      const pYm = parseYearMonthFromSheetName(sheetName);
+      if (pYm.valid && isCognitiveActive(pYm.year, pYm.month)) {
+        const l1v = (sheet.getRange('L1').getValue() || '').toString().trim();
+        if (l1v === '卡介苗') sheet.getRange('L1').setValue('卡介/換照');
+      }
+    } catch(eL1) {}
 
     // ver4.7：寫入停班2線系統挪移 cell note (M 欄)，避免 swap 紀錄遺失
     // swapInfo: { dengSwapped: [rowIdx,...], dengSwapDateMap: { rowIdx: 'M/d', ... } }

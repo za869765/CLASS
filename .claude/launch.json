@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/MIHC/AppData/Local/Temp/claude/D--Backup-Desktop-CODE-project-CLASS/c290d9c5-1e0b-4280-a74d-a19105b895f8/scratchpad/serve.js"],
+      "port": 8737
+    }
+  ]
+}
