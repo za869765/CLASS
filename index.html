@@ -482,7 +482,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
     <div id="fpMsg" style="display:none;font-size:.88rem;font-weight:700;margin-bottom:10px;padding:8px 14px;border-radius:8px;background:#e8f5e9;color:#2e7d32"></div>
     <!-- ver4.8：拖曳操作說明（常駐，取代只在異動後才出現的面板說明） -->
     <div id="fpDragHint" style="font-size:.72rem;color:#8a6d3b;background:#fffde7;border:1px solid #ffe082;border-radius:8px;padding:5px 12px;margin-bottom:8px">
-      💡 操作說明：直接<b>拖曳人名</b>到其他格子即可對調；點<b>空白格</b>可補人、點有人的格子可替換。橙色格＝系統自動挪移，滑鼠移上可見原日期。（拖曳需以電腦滑鼠操作）
+      💡 操作說明：直接<b>拖曳人名</b>到其他格子即可對調；點<b>空白格</b>可補人、點有人的格子可替換。橙色格＝系統自動挪移，滑鼠移上可見原日期。<b style="color:#b71c1c">挪動「值班」會跳確認視窗（5秒倒數）並在該格標＊</b>。（拖曳需以電腦滑鼠操作）
     </div>
     <!-- 表格容器 -->
     <div id="fpTableWrap" style="overflow:auto">
@@ -524,6 +524,21 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
         <div style="display:flex;gap:10px;justify-content:center">
           <button id="fpOverwriteCancel" style="background:linear-gradient(90deg,#90a4ae,#607d8b);color:#fff;font-size:.95rem;font-weight:700;border-radius:12px;padding:12px 28px;margin:0;width:auto">取消</button>
           <button id="fpOverwriteOk" style="background:linear-gradient(135deg,#b71c1c,#e53935);color:#fff;font-size:.95rem;font-weight:900;border-radius:12px;padding:12px 28px;margin:0;width:auto;box-shadow:0 4px 14px rgba(229,57,53,.3)">確定覆蓋</button>
+        </div>
+      </div>
+    </div>
+    <!-- ver4.9：值班更動確認彈窗（排班/審核拖曳限定；確認鈕 5 秒冷靜倒數） -->
+    <div id="fpDutyConfirmOverlay" style="display:none;position:absolute;inset:0;z-index:56;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);align-items:center;justify-content:center;border-radius:16px">
+      <div style="background:#fff;border:3px solid #c62828;border-radius:24px;padding:32px 40px;text-align:center;box-shadow:0 20px 60px rgba(198,40,40,.35);max-width:88%;animation:popBounce .4s cubic-bezier(.34,1.56,.64,1) both">
+        <div style="font-size:3rem;margin-bottom:10px">🛑</div>
+        <div style="font-weight:900;font-size:1.3rem;color:#b71c1c;margin-bottom:10px;letter-spacing:.5px">確定要更動「值班」？</div>
+        <div id="fpDutyConfirmDesc" style="font-size:.95rem;color:#444;line-height:1.9;margin-bottom:8px;padding:0 8px"></div>
+        <div style="font-size:.8rem;color:#888;line-height:1.8;margin-bottom:20px;padding:0 8px">
+          值班有<b>跨月輪序接續</b>與<b>加班時數統計</b>，更動會留下異動紀錄，<br>且該格名字會標示「<b style="color:#b71c1c">＊</b>」供辨識。
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <button id="fpDutyCancel" style="background:linear-gradient(90deg,#90a4ae,#607d8b);color:#fff;font-size:.95rem;font-weight:700;border-radius:12px;padding:12px 28px;margin:0;width:auto">取消</button>
+          <button id="fpDutyOk" disabled style="background:linear-gradient(135deg,#b71c1c,#e53935);color:#fff;font-size:.95rem;font-weight:900;border-radius:12px;padding:12px 28px;margin:0;width:auto;box-shadow:0 4px 14px rgba(229,57,53,.3)">確認更動（5）</button>
         </div>
       </div>
     </div>
@@ -2650,7 +2665,7 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
       var p = k.split(':');
       var row=parseInt(p[0]), ci=parseInt(p[1]);
       var td = getFpTd(row, ci);
-      if(td) renderFpCell(td, entry.curName, true, !!entry.isAudit);
+      if(td) renderFpCell(td, entry.curName, true, !!entry.isAudit, ci);
     });
     makeFpTableAddable();
   }, 80);
@@ -2952,6 +2967,36 @@ function showFpOverwriteConfirm(cb){
   if(cancelBtn) cancelBtn.onclick = function(){ _close(false); };
 }
 
+// ver4.9：值班更動確認（排班/審核拖曳限定；確認鈕 5 秒冷靜倒數才可按）
+var _fpDutyTimer = null;
+function showFpDutyConfirm(detail, cb){
+  var ov = el('fpDutyConfirmOverlay');
+  if(!ov){ if(cb) cb(true); return; }
+  var desc = el('fpDutyConfirmDesc');
+  if(desc) desc.innerHTML = detail || '';
+  ov.style.display = 'flex';
+  var okBtn = el('fpDutyOk'), cancelBtn = el('fpDutyCancel');
+  var remain = 5;
+  if(_fpDutyTimer){ clearInterval(_fpDutyTimer); _fpDutyTimer = null; }
+  if(okBtn){ okBtn.disabled = true; okBtn.textContent = '確認更動（'+remain+'）'; }
+  _fpDutyTimer = setInterval(function(){
+    remain--;
+    if(remain <= 0){
+      clearInterval(_fpDutyTimer); _fpDutyTimer = null;
+      if(okBtn){ okBtn.disabled = false; okBtn.textContent = '✅ 確認更動值班'; }
+    } else if(okBtn){ okBtn.textContent = '確認更動（'+remain+'）'; }
+  }, 1000);
+  function _close(res){
+    ov.style.display = 'none';
+    if(_fpDutyTimer){ clearInterval(_fpDutyTimer); _fpDutyTimer = null; }
+    if(okBtn) okBtn.onclick = null;
+    if(cancelBtn) cancelBtn.onclick = null;
+    if(cb) cb(res);
+  }
+  if(okBtn) okBtn.onclick = function(){ if(!okBtn.disabled) _close(true); };
+  if(cancelBtn) cancelBtn.onclick = function(){ _close(false); };
+}
+
 function makeFpTableDraggable(){
   var tbl = el('fpTable');
   if(!tbl) return;
@@ -3068,8 +3113,8 @@ function makeFpTableDraggable(){
           // Update DOM
           var srcTd2 = getFpTd(src.rowIdx, src.ci) || src.td;
           var dstTd2 = getFpTd(dstRow, dstCi)      || td;
-          renderFpCell(srcTd2, dstName, !cellIsOriginal(src.rowIdx, src.ci));
-          renderFpCell(dstTd2, srcName, !cellIsOriginal(dstRow, dstCi));
+          renderFpCell(srcTd2, dstName, !cellIsOriginal(src.rowIdx, src.ci), undefined, src.ci);
+          renderFpCell(dstTd2, srcName, !cellIsOriginal(dstRow, dstCi), undefined, dstCi);
 
           _fpDragSrc = null;
           updateFpDragPanel();
@@ -3077,14 +3122,28 @@ function makeFpTableDraggable(){
         }
 
         // ver4.7：若 src 或 dst 是排班者既有異動 (preloaded)，彈確認框提醒「二次更動」
-        if(_isPreloadedCell(src.rowIdx, src.ci) || _isPreloadedCell(dstRow, dstCi)){
-          showFpOverwriteConfirm(function(ok){
-            if(ok) _doSwap();
-            else _fpDragSrc = null;
-          });
+        var _nextStep = function(){
+          if(_isPreloadedCell(src.rowIdx, src.ci) || _isPreloadedCell(dstRow, dstCi)){
+            showFpOverwriteConfirm(function(ok){
+              if(ok) _doSwap();
+              else _fpDragSrc = null;
+            });
+            return;
+          }
+          _doSwap();
+        };
+        // ver4.9：值班更動需確認（5秒冷靜倒數），僅排班/審核拖曳流程
+        if(src.ci === 0 || dstCi === 0){
+          var _dts = _fpPreviewData.dates || [];
+          var _dsA = (_dts[src.rowIdx] ? _dts[src.rowIdx][0] : '') || '';
+          var _dsB = (_dts[dstRow] ? _dts[dstRow][0] : '') || '';
+          showFpDutyConfirm(
+            x(_dsA)+'「'+x(srcName)+'」 ⇄ '+x(_dsB)+'「'+x(dstName||'空')+'」',
+            function(ok){ if(ok) _nextStep(); else _fpDragSrc = null; }
+          );
           return;
         }
-        _doSwap();
+        _nextStep();
       };
       td.addEventListener('dragstart', td._onDragStart);
       td.addEventListener('dragend',   td._onDragEnd);
@@ -3112,12 +3171,13 @@ function getFpTd(rowIdx, ci){
   return rows[rowIdx].querySelectorAll('td')[ci+1] || null;
 }
 
-function renderFpCell(td, name, isDragged, isAuditCell){
+function renderFpCell(td, name, isDragged, isAuditCell, ci){
   if(!td) return;
   // isAuditCell: 明確指定是否為審核者異動（不依賴全域 _fpAuditMode）
   var auditMode = (isAuditCell !== undefined) ? isAuditCell : _fpAuditMode;
   if(isDragged){
-    td.textContent = name || '–';
+    // ver4.9：值班（ci=0）異動格加「＊」標示（僅預覽顯示，寫入資料不含＊）
+    td.textContent = (name || '–') + ((ci === 0 && name) ? '＊' : '');
     if(name){
       // 直接設定 inline style（繞過所有 CSS 優先序問題）
       if(auditMode){
@@ -3275,7 +3335,7 @@ function rebuildFpTable(){
     html += '<tr class="'+(isWknd?'fp-wknd':'')+'"><td class="fp-date">'+x(ds)+'</td>';
     row.forEach(function(cell, ci){
       var isDragged = _fpDragChanges.some(function(d){ return (d.srcRow===i&&d.srcCi===ci)||(d.dstRow===i&&d.dstCi===ci); });
-      html += '<td class="'+(isDragged?'fp-dragged':(!cell?'fp-empty':''))+'">'+x(cell||'–')+'</td>';
+      html += '<td class="'+(isDragged?'fp-dragged':(!cell?'fp-empty':''))+'">'+x(cell||'–')+((isDragged&&ci===0&&cell)?'＊':'')+'</td>';
     });
     html += '</tr>';
   });
@@ -3792,6 +3852,22 @@ function pickAddNurse(name){
   hideAddPicker();
   if(!target || !_fpPreviewData) return;
   var rowIdx = target.rowIdx, ci = target.ci, td = target.td;
+  // ver4.9：值班替換需確認（5秒冷靜倒數）
+  if(ci === 0){
+    var _dts0 = _fpPreviewData.dates || [];
+    var _ds0 = (_dts0[rowIdx] ? _dts0[rowIdx][0] : '') || '';
+    var _old0 = getCellName(rowIdx, 0);
+    showFpDutyConfirm(
+      x(_ds0)+'「'+x(_old0||'空')+'」 → 「'+x(name)+'」',
+      function(ok){ if(ok) _applyPickAdd(target, name); }
+    );
+    return;
+  }
+  _applyPickAdd(target, name);
+}
+
+function _applyPickAdd(target, name){
+  var rowIdx = target.rowIdx, ci = target.ci, td = target.td;
   var headers = _fpPreviewData.headers || [];
   var dates   = _fpPreviewData.dates   || [];
   var date    = (dates[rowIdx] ? dates[rowIdx][0] : '') || '';
@@ -3814,7 +3890,7 @@ function pickAddNurse(name){
   rebuildDragChanges();
 
   // Update DOM
-  renderFpCell(getFpTd(rowIdx, ci) || td, name, !cellIsOriginal(rowIdx, ci));
+  renderFpCell(getFpTd(rowIdx, ci) || td, name, !cellIsOriginal(rowIdx, ci), undefined, ci);
 
   updateFpDragPanel();
   buildFpStats();
