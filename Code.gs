@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.2 - ver5.1全功能＋值班確認冷靜秒數後台可調（班表設定F4，預設5秒/0=不倒數）
+// ver5.3 - ver5.2全功能＋卡介苗輪序接續上月原始站班者（Q欄順位+1；查無起點回退固定日曆公式）
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -2488,15 +2488,51 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         if (ex9) { bcgPersonThisMonth = ex9; break; }
       }
 
-      // v4.8.1 嚴格 ABCABC 循環，BASE 固定 2026/6（Q1=蔡錦慧 idx 0）
-      //   目的：既有 4-7 月（N=2）順序保留 + 8 月起 N=3 加入新人時 8 月 = Q3
-      //   N=2 推：4=Q1(蔡)、5=Q2(呂)、6=Q1、7=Q2 ✓（跟既有 sheet 一致）
-      //   N=3 推：8=Q3(新)、9=Q1(蔡)、10=Q2(呂)、11=Q3、12=Q1…跨年連續
-      //   該 idx 當天 excluded（請假/離職）→ 順序往下找 valid candidate
-      const _BCG_BASE_ABS = 2026 * 12 + 5;   // 2026/6 (idx 0)
-      const _absMonth = year * 12 + (month - 1);
-      const _diff = _absMonth - _BCG_BASE_ABS;
-      const _baseIdx  = ((_diff % qCandNames.length) + qCandNames.length) % qCandNames.length;
+      // ver5.3 卡介苗輪序改「接續上月原始站班者」（原 v4.8.1 固定日曆公式退為 fallback）
+      //   上月卡介苗日（首個工作週二）的「原始排班人」（buildOriginalScheduleMap 反推換班前的人，
+      //   換班/拖曳不進輪序帳——與值班/停班2線跨月接續、公平帳同基準）在 Q 欄順位 +1 = 本月人選。
+      //   查不到起點（上月無表 / 卡介苗日空白 / 站班者不在 Q 欄）→ fallback 固定日曆公式
+      //   （BASE 2026/6 = Q1），跨月斷檔或全新年度仍有確定性結果。
+      //   選定 idx 當天 excluded（請假/離職）→ 順序往下找 valid candidate（既有邏輯不變）。
+      let _baseIdx = -1;
+      try {
+        const _prevM2 = month === 1 ? 12 : month - 1;
+        const _prevY2 = month === 1 ? year - 1 : year;
+        const _rocM2 = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
+        const _prevSN2 = rocNumToStr(_prevY2 - 1911) + '年' + _rocM2[_prevM2] + '月班表';
+        const _prevSh2 = spreadsheet.getSheetByName(_prevSN2);
+        const _prevBcgDay = getFirstTuesdayWorkday(_prevY2, _prevM2);
+        if (_prevSh2 && _prevBcgDay > 0) {
+          // 原始排班人優先（'M/d|9' = L欄），該日無換班/拖曳紀錄才用儲存格現值
+          const _origMapB = buildOriginalScheduleMap(_prevSN2);
+          let _lastBcg = _origMapB[_prevM2 + '/' + _prevBcgDay + '|9'] || '';
+          if (!_lastBcg) {
+            const _pRows = _prevSh2.getRange('A2:L32').getValues();
+            for (let _pr = 0; _pr < _pRows.length; _pr++) {
+              const _rawA = _pRows[_pr][0];
+              let _pd = null;
+              if (_rawA instanceof Date) _pd = _rawA;
+              else {
+                const _mm = _rawA ? _rawA.toString().match(/(\d+)\/(\d+)/) : null;
+                if (_mm) { try { _pd = new Date(_prevY2, parseInt(_mm[1]) - 1, parseInt(_mm[2])); } catch(e) {} }
+              }
+              if (!_pd || _pd.getMonth() + 1 !== _prevM2 || _pd.getDate() !== _prevBcgDay) continue;
+              _lastBcg = _pRows[_pr][11] ? _pRows[_pr][11].toString().trim() : '';   // A2:L32 中 index 11 = L欄
+              break;
+            }
+          }
+          if (_lastBcg) {
+            const _li = qCandNames.indexOf(_lastBcg.toString().trim());
+            if (_li !== -1) _baseIdx = (_li + 1) % qCandNames.length;
+          }
+        }
+      } catch(e) { Logger.log('[BCG輪序] 上月接續查詢失敗，改用固定公式: ' + e.message); }
+      if (_baseIdx === -1) {
+        const _BCG_BASE_ABS = 2026 * 12 + 5;   // 2026/6 (idx 0)
+        const _absMonth = year * 12 + (month - 1);
+        const _diff = _absMonth - _BCG_BASE_ABS;
+        _baseIdx = ((_diff % qCandNames.length) + qCandNames.length) % qCandNames.length;
+      }
       for (let _off = 0; _off < qCandNames.length; _off++) {
         const _tryIdx  = (_baseIdx + _off) % qCandNames.length;
         const _tryName = qCandNames[_tryIdx];
