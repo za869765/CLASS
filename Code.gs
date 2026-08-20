@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.3 - ver5.2全功能＋卡介苗輪序接續上月原始站班者（Q欄順位+1；查無起點回退固定日曆公式）
+// ver5.3 - ver5.2全功能＋卡介苗輪序接續上月原始站班者（Q欄順位+1；查無起點回退固定公式）＋2026/10一次性錨定陳伶雯（10陳→11蔡→12呂）
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -2494,8 +2494,15 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       //   查不到起點（上月無表 / 卡介苗日空白 / 站班者不在 Q 欄）→ fallback 固定日曆公式
       //   （BASE 2026/6 = Q1），跨月斷檔或全新年度仍有確定性結果。
       //   選定 idx 當天 excluded（請假/離職）→ 順序往下找 valid candidate（既有邏輯不變）。
+      // ver5.3.1 一次性錨定：7~9月實際站班已偏離輪序（7月舊演算法排陳伶雯、8月拖曳改蔡錦慧），
+      //   當事人已自行換班協調，2026/10 起重啟輪序：10月陳伶雯 → 11月蔡錦慧 → 12月呂佳卉，
+      //   之後由「接續上月」自動延續（陳→蔡→呂 跨年循環）。
+      //   錨定人屆時若不在 Q 欄名單 → 忽略錨定，照上月接續／固定公式。
+      const _BCG_ANCHOR = { '2026-10': '陳伶雯' };
       let _baseIdx = -1;
-      try {
+      const _anchorNm = _BCG_ANCHOR[year + '-' + month];
+      if (_anchorNm && qCandNames.indexOf(_anchorNm) !== -1) _baseIdx = qCandNames.indexOf(_anchorNm);
+      if (_baseIdx === -1) try {
         const _prevM2 = month === 1 ? 12 : month - 1;
         const _prevY2 = month === 1 ? year - 1 : year;
         const _rocM2 = ['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
@@ -2528,7 +2535,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         }
       } catch(e) { Logger.log('[BCG輪序] 上月接續查詢失敗，改用固定公式: ' + e.message); }
       if (_baseIdx === -1) {
-        const _BCG_BASE_ABS = 2026 * 12 + 5;   // 2026/6 (idx 0)
+        const _BCG_BASE_ABS = 2026 * 12 + 10;  // ver5.3.1 重錨 2026/11=Q1蔡錦慧（與 10陳→11蔡→12呂 新輪序同相位）
         const _absMonth = year * 12 + (month - 1);
         const _diff = _absMonth - _BCG_BASE_ABS;
         _baseIdx = ((_diff % qCandNames.length) + qCandNames.length) % qCandNames.length;
