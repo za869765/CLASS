@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.3 - ver5.2全功能＋卡介苗輪序接續上月原始站班者（Q欄順位+1；查無起點回退固定公式）＋2026/10一次性錨定陳伶雯（10陳→11蔡→12呂）
+// ver5.4 - ver5.3全功能＋班表提醒信格式優化（wrapper防webmail跑版/職務欄35%/個人化開頭+班別摘要/本人班別★標記/其他人員分隔）
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -515,15 +515,16 @@ function getDaySchedule(spreadsheet, dateObj, timezone) {
 // 建立美化 HTML 通知信件
 // =============================================
 function buildScheduleHtml(personName, daySchedules, isAuto) {
-  const intro = isAuto
-    ? `您好，以下是您的即將到來的班表提醒。`
-    : `您好，以下是您被補寄的班表資訊。`;
+  // ver5.4：格式優化——wrapper 防 webmail 剝 body 樣式跑版、職務欄35%、個人化開頭+班別摘要、本人班別★標記、其他人員分隔
+  const dutyBadge = s => `<span style="background:#e65100;color:#fff;border-radius:6px;padding:2px 8px;margin-left:4px;font-size:.85em;white-space:nowrap">${s}</span>`;
+  const mySummary = []; // 每天一句：8/26（週三）+ 班別 badge
 
   const tableRows = daySchedules.map(ds => {
     const duties = ds.duties || [];
     if (duties.length === 0) return '';
     const myDuties = duties.filter(d => d.person && d.person.includes(personName));
     if (myDuties.length === 0) return '';
+    mySummary.push(`${ds.dateStr}（週${ds.weekDay}）` + myDuties.map(d => dutyBadge(d.shift)).join(''));
 
     const isHol  = isHoliday(ds.date);
     const dayBg  = isHol ? '#fff3e0' : '#e3f2fd';
@@ -532,37 +533,49 @@ function buildScheduleHtml(personName, daySchedules, isAuto) {
       📅 ${ds.dateStr}（週${ds.weekDay}）${isHol?'　🏖 假日/休假':''}
     </td></tr>`;
     myDuties.forEach(d => {
-      html += `<tr style="background:#fff9c4"><td style="padding:7px 14px;border:1px solid #ddd;font-weight:700;color:#e65100">${d.shift}</td>
-               <td style="padding:7px 14px;border:1px solid #ddd;font-weight:700;color:#e65100">${d.person}</td></tr>`;
+      html += `<tr style="background:#fff9c4"><td style="padding:8px 14px;border:1px solid #ddd;border-left:5px solid #e65100;font-weight:700;color:#e65100">${d.shift}</td>
+               <td style="padding:8px 14px;border:1px solid #ddd;font-weight:700;color:#e65100">${d.person}　<span style="background:#e65100;color:#fff;font-size:.74rem;border-radius:10px;padding:2px 9px;font-weight:900;white-space:nowrap">★ 您的班</span></td></tr>`;
     });
-    // 其他非本人的班別（灰色）
-    duties.filter(d => !myDuties.includes(d)).forEach(d => {
-      html += `<tr><td style="padding:6px 14px;border:1px solid #eee;color:#666">${d.shift}</td>
-               <td style="padding:6px 14px;border:1px solid #eee;color:#666">${d.person}</td></tr>`;
-    });
+    // 其他非本人的班別（灰色，前置小標分隔）
+    const others = duties.filter(d => !myDuties.includes(d));
+    if (others.length) {
+      html += `<tr><td colspan="2" style="padding:6px 14px;background:#fafafa;color:#9e9e9e;font-size:.76rem;border:1px solid #eee">其他人員</td></tr>`;
+      others.forEach(d => {
+        html += `<tr><td style="padding:6px 14px;border:1px solid #eee;color:#666">${d.shift}</td>
+                 <td style="padding:6px 14px;border:1px solid #eee;color:#666">${d.person}</td></tr>`;
+      });
+    }
     return html;
   }).filter(Boolean).join('');
 
   if (!tableRows) return null;
 
-  return `<!DOCTYPE html><html><body style="font-family:'Helvetica Neue',Arial,sans-serif;color:#333;max-width:600px;margin:0 auto;padding:16px">
-  <div style="background:linear-gradient(135deg,#1565c0,#0288d1);padding:18px 24px;border-radius:12px 12px 0 0;text-align:center">
-    <div style="font-size:1.6rem;color:#fff;font-weight:900">佳里區衛生所</div>
-    <div style="font-size:.9rem;color:rgba(255,255,255,.85);margin-top:4px">班表小幫手 — 班表提醒</div>
+  const summaryLabel = isAuto ? '您即將到來的班別' : '補寄班表－您的班別';
+  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f6f8">
+  <div style="max-width:640px;margin:0 auto;padding:16px 8px;font-family:'Helvetica Neue','Microsoft JhengHei',Arial,sans-serif;color:#333">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
+    <div style="background:linear-gradient(135deg,#1565c0,#0288d1);background-color:#1565c0;padding:18px 24px;text-align:center">
+      <div style="font-size:1.5rem;color:#fff;font-weight:900">佳里區衛生所</div>
+      <div style="font-size:.88rem;color:rgba(255,255,255,.85);margin-top:4px">班表小幫手 — 班表提醒</div>
+    </div>
+    <div style="padding:20px 22px">
+      <p style="font-size:1.02rem;margin:0 0 6px;font-weight:700">${personName} 您好</p>
+      <p style="font-size:.92rem;margin:0 0 16px;background:#fff3e0;border-radius:8px;padding:10px 14px;color:#bf360c;font-weight:700;line-height:1.9">
+        ${summaryLabel}：${mySummary.join('、')}
+      </p>
+      <table style="border-collapse:collapse;width:100%;font-size:.88rem">
+        <tr style="background:#1565c0;color:#fff">
+          <th style="padding:8px 14px;text-align:left;width:35%">職務</th>
+          <th style="padding:8px 14px;text-align:left">人員</th>
+        </tr>
+        ${tableRows}
+      </table>
+      <p style="font-size:.78rem;color:#999;margin:20px 0 0;border-top:1px solid #eee;padding-top:10px">
+       ⚠️ 此信件由系統自動發送，請勿回覆。<br>
+        本信件為班表提醒通知，非社交工程郵件。
+      </p>
+    </div>
   </div>
-  <div style="background:#fff;border:1px solid #e0e0e0;border-radius:0 0 12px 12px;padding:20px 24px">
-    <p style="font-size:1rem;margin:0 0 14px">${intro}</p>
-    <table style="border-collapse:collapse;width:100%;font-size:.88rem">
-      <tr style="background:#1565c0;color:#fff">
-        <th style="padding:8px 14px;text-align:left">職務</th>
-        <th style="padding:8px 14px;text-align:left">人員</th>
-      </tr>
-      ${tableRows}
-    </table>
-    <p style="font-size:.78rem;color:#999;margin-top:20px;border-top:1px solid #eee;padding-top:10px">
-     ⚠️ 此信件由系統自動發送，請勿回覆。<br>
-      本信件為班表提醒通知，非社交工程郵件。
-    </p>
   </div>
   </body></html>`;
 }
