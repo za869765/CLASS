@@ -1,6 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.4 - ver5.3全功能＋班表提醒信格式優化（wrapper防webmail跑版/職務欄35%/個人化開頭+班別摘要/本人班別★標記/其他人員分隔）
+// ver5.4.1 - 班表提醒信格式優化（職務欄35%/個人化開頭+班別摘要/本人班別★標記/其他人員分隔）；5.4.1=公務信箱無視div max-width改table width="600"屬性限寬
 // =============================================
 
 const SHEET_ID = '1NMiyJr0p6Vq6J2ubZy8xr3UArJhO-Vp3s4UXLOeqOUQ';
@@ -551,14 +551,15 @@ function buildScheduleHtml(personName, daySchedules, isAuto) {
   if (!tableRows) return null;
 
   const summaryLabel = isAuto ? '您即將到來的班別' : '補寄班表－您的班別';
+  // ver5.4.1：公務信箱 webmail 無視 div max-width → 改巢狀 table + width="600" 屬性置中限寬（email 通用保險做法）
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f6f8">
-  <div style="max-width:640px;margin:0 auto;padding:16px 8px;font-family:'Helvetica Neue','Microsoft JhengHei',Arial,sans-serif;color:#333">
-  <div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;border-radius:12px;overflow:hidden">
-    <div style="background:linear-gradient(135deg,#1565c0,#0288d1);background-color:#1565c0;padding:18px 24px;text-align:center">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f6f8"><tr><td align="center" style="padding:16px 8px">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#fff;border:1px solid #e0e0e0;border-radius:12px;font-family:'Helvetica Neue','Microsoft JhengHei',Arial,sans-serif;color:#333">
+    <tr><td style="background:linear-gradient(135deg,#1565c0,#0288d1);background-color:#1565c0;padding:18px 24px;text-align:center;border-radius:12px 12px 0 0">
       <div style="font-size:1.5rem;color:#fff;font-weight:900">佳里區衛生所</div>
       <div style="font-size:.88rem;color:rgba(255,255,255,.85);margin-top:4px">班表小幫手 — 班表提醒</div>
-    </div>
-    <div style="padding:20px 22px">
+    </td></tr>
+    <tr><td style="padding:20px 22px">
       <p style="font-size:1.02rem;margin:0 0 6px;font-weight:700">${personName} 您好</p>
       <p style="font-size:.92rem;margin:0 0 16px;background:#fff3e0;border-radius:8px;padding:10px 14px;color:#bf360c;font-weight:700;line-height:1.9">
         ${summaryLabel}：${mySummary.join('、')}
@@ -574,9 +575,9 @@ function buildScheduleHtml(personName, daySchedules, isAuto) {
        ⚠️ 此信件由系統自動發送，請勿回覆。<br>
         本信件為班表提醒通知，非社交工程郵件。
       </p>
-    </div>
-  </div>
-  </div>
+    </td></tr>
+  </table>
+  </td></tr></table>
   </body></html>`;
 }
 
