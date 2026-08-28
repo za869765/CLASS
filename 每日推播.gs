@@ -1,5 +1,14 @@
 // ===== 完整整合版 Google Apps Script 代碼 =====
-// 版本: 2026-08-25 v6.3
+// 版本: 2026-08-28 v6.4
+//
+// === v6.4 修正 (2026-08-28) ===
+// 天氣抓取強化(2026-08-27 06:19 自動推播整批「無法連線」——Open-Meteo 對
+// Google 共用出口 IP 偶發限流/失敗,單次失敗即整篇無資料)
+//   • 重試:非 200 或例外時間隔 2 秒重試,最多打 3 次,並記錄 HTTP 狀態碼
+//   • 持久備援:成功即存精簡版資料到 ScriptProperties(跨執行存活);
+//     3 次全失敗時改用 24 小時內的上次成功資料(forecast 為兩天份,舊數小時仍可用)
+//   • 精簡欄位:只保留 daily 全部 + hourly.precipitation_probability/uv_index,
+//     避免 ScriptProperties 9KB 上限風險(hourly.time 等未使用欄位不存)
 //
 // === v6.3 修正 (2026-08-25) ===
 // 天氣來源由 wttr.in 更換為 Open-Meteo(https://open-meteo.com)
@@ -63,26 +72,69 @@ function getWeatherDataCached() {
     globalWeatherCacheTime = now;
     return data;
   }
-  try {
-    Logger.log("從 API 取得天氣資料 (Open-Meteo)");
-    var response = UrlFetchApp.fetch(WEATHER_API_URL, { muteHttpExceptions: true });
-    if (response.getResponseCode() !== 200) {
-      Logger.log("天氣 API 回應錯誤: " + response.getResponseCode());
-      return null;
+  // v6.4:重試最多 3 次(間隔 2 秒),並記錄每次失敗的 HTTP 狀態碼
+  var data = null;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    try {
+      Logger.log("從 API 取得天氣資料 (Open-Meteo)，第 " + attempt + " 次");
+      var response = UrlFetchApp.fetch(WEATHER_API_URL, { muteHttpExceptions: true });
+      var code = response.getResponseCode();
+      if (code !== 200) {
+        Logger.log("天氣 API 回應錯誤: HTTP " + code);
+      } else {
+        var parsed = JSON.parse(response.getContentText());
+        if (!parsed.daily || !parsed.hourly) {
+          Logger.log("天氣 API 資料格式異常");
+        } else {
+          data = slimWeatherData_(parsed);
+          break;
+        }
+      }
+    } catch (e) {
+      Logger.log("天氣 API 錯誤: " + e.toString());
     }
-    var data = JSON.parse(response.getContentText());
-    if (!data.daily || !data.hourly) {
-      Logger.log("天氣 API 資料格式異常");
-      return null;
-    }
+    if (attempt < 3) Utilities.sleep(2000);
+  }
+
+  if (data) {
     cache.put(cacheKey, JSON.stringify(data), 3600);
     globalWeatherCache     = data;
     globalWeatherCacheTime = now;
+    // v6.4:持久備援(跨執行存活;失敗日可用前次成功資料)
+    try {
+      PropertiesService.getScriptProperties()
+        .setProperty('lastWeatherOk', JSON.stringify({ ts: now, data: data }));
+    } catch (e) { Logger.log("備援寫入失敗: " + e.toString()); }
     return data;
-  } catch (e) {
-    Logger.log("天氣 API 錯誤: " + e.toString());
-    return null;
   }
+
+  // v6.4:3 次全失敗 → 讀 24 小時內的上次成功資料當備援
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty('lastWeatherOk');
+    if (raw) {
+      var backup = JSON.parse(raw);
+      if (backup && backup.data && (now - backup.ts) < 24 * 3600 * 1000) {
+        Logger.log("⚠️ API 全數失敗，改用 " + Math.round((now - backup.ts) / 3600000) + " 小時前的備援天氣資料");
+        globalWeatherCache     = backup.data;
+        globalWeatherCacheTime = now;
+        return backup.data;
+      }
+      Logger.log("備援資料已超過 24 小時，不使用");
+    }
+  } catch (e) { Logger.log("備援讀取失敗: " + e.toString()); }
+  return null;
+}
+
+// v6.4:只留推播實際用到的欄位(daily 全部 + 降雨機率/UV)，
+// 縮小 ScriptProperties 用量(單一屬性上限 9KB，hourly.time 等不存)
+function slimWeatherData_(data) {
+  return {
+    daily: data.daily,
+    hourly: {
+      precipitation_probability: data.hourly.precipitation_probability,
+      uv_index:                  data.hourly.uv_index
+    }
+  };
 }
 
 // ===== 設定區域 =====

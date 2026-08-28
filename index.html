@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="version" content="ver5.4">
+<meta name="version" content="ver5.5">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -1456,7 +1456,7 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
   </div>
 </div>
 
-<div id="vi">ver 5.3</div>
+<div id="vi">ver 5.5</div>
 <div id="ca"></div>
 
 <script>
@@ -1817,7 +1817,8 @@ function viewSched(){
       var changes=data.changes||{};
 
       var html='<tr><th></th>';
-      data.headers.forEach(function(h){html+='<th>'+x(h)+'</th>';});
+      // ver5.5：10~11月標題顯示別名（支援→掛號2、預登2注→預登2/機動；內部 key 仍用原標題）
+      data.headers.forEach(function(h){html+='<th>'+x(octNovHdrAlias(h, !!data.octNovSpecial))+'</th>';});
       html+='</tr>';
 
       data.schedule.forEach(function(row,i){
@@ -2495,6 +2496,14 @@ function wcToLetter(wc){
   return result;
 }
 var _fpWriteLetter = '';  // 當次預覽的版次字母（由 showFullPreview 傳入）
+
+// ver5.5：10~11月人力崗位變更——欄位標題顯示別名（僅顯示用，內部 key/日誌仍用原標題）
+function octNovHdrAlias(h, special){
+  if(!special) return h;
+  if(h === '支援') return '掛號2';
+  if(h === '預登2注') return '預登2/機動';
+  return h;
+}
 var _fpDragChanges = [];  // ★ 拖曳異動紀錄 [{rowIdx,ci,oldName,newName,date,header,reason}]
 var _fpPreviewData = null; // ★ 當前預覽資料參考（供拖曳修改用）
 var _fpDragMode = false;   // ★ 是否為可寫入模式（有 writeCallback）
@@ -2530,7 +2539,7 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
 
   // 建立表頭
   var html = '<thead><tr><th style="min-width:80px">日期</th>';
-  headers.forEach(function(h){ html += '<th style="min-width:60px">'+x(h)+'</th>'; });
+  headers.forEach(function(h){ html += '<th style="min-width:60px">'+x(octNovHdrAlias(h, !!r.octNovSpecial))+'</th>'; });
   html += '</tr></thead><tbody>';
 
   // 建立資料列
@@ -2612,6 +2621,8 @@ function showFullPreview(r, title, subtitle, writeCallback, writeLetter) {
 
   _fpPreviewData = { headers: headers, preview: preview, dates: dates, holRows: holRows,
     clinicStaff: r.clinicStaff || [],
+    // ver5.5：10~11月人力崗位變更旗標（週五格可拖曳/新增、週五併週四統計）
+    friAsThu: !!r.octNovSpecial, octNovSpecial: !!r.octNovSpecial,
     // ver4.9：L欄業務類型（BCG/COG）＋兩池名單（卡介苗Q欄/高齡認知G欄）
     lTypes: r.lTypes || [], cogActive: !!r.cogActive,
     bcgStaff: r.bcgStaff || [], cogStaff: r.cogStaff || [],
@@ -3342,7 +3353,7 @@ function rebuildFpTable(){
   if(!_fpPreviewData) return;
   var r = _fpPreviewData;
   var html = '<thead><tr><th style="min-width:80px">日期</th>';
-  r.headers.forEach(function(h){ html += '<th style="min-width:60px">'+x(h)+'</th>'; });
+  r.headers.forEach(function(h){ html += '<th style="min-width:60px">'+x(octNovHdrAlias(h, !!r.friAsThu))+'</th>'; });
   html += '</tr></thead><tbody>';
   r.preview.forEach(function(row, i){
     var ds = (r.dates[i] ? r.dates[i][0] : '') || '';
@@ -3394,8 +3405,9 @@ function buildFpStats(){
   if(!headers.length || !preview.length){ panel.style.display='none'; return; }
 
   // ── 實際欄位名稱 ─────────────────────────────────────────────
+  var spStats = !!_fpPreviewData.friAsThu;  // ver5.5：10~11月（週五併週四桶、支援→掛號2）
   var hDuty   = headers[0]||'值班';
-  var hSupp   = headers[1]||'支援';
+  var hSupp   = octNovHdrAlias(headers[1]||'支援', spStats);
   var hDiag   = headers[2]||'門診';
   var hReg    = headers[3]||'掛號';
   var hFront  = headers[4]||'前台';
@@ -3439,6 +3451,7 @@ function buildFpStats(){
     var wkm = ds.match(/週([一二三四五六日])/);
     var dow = wkm ? (wkMap[wkm[1]] !== undefined ? wkMap[wkm[1]] : -1) : -1;
     var isHol = holRows.length>0 ? !!holRows[ri] : (dow===0||dow===6);
+    if(spStats && dow===5) dow = 4;  // ver5.5：週五班次併入（四）桶
 
     for(var ci=0; ci<row.length; ci++){
       var v = row[ci]; if(!v||!v.toString().trim()) continue;
@@ -3473,7 +3486,7 @@ function buildFpStats(){
   var dutyCols = [
     {key:'值班_平',  label:'值班(平)', title:'值班（平日）',     bg:'#e3f2fd'},
     {key:'值班_假',  label:'值班(假)', title:'值班（假日）',     bg:'#fff3e0'},
-    {key:hSupp,      label:'支援',     title:'支援',             bg:'#f3e5f5'},
+    {key:hSupp,      label:hSupp,      title:hSupp,              bg:'#f3e5f5'},
     {key:'停班_平',  label:'2線(平)',  title:'停班2線（平日）',  bg:'#ede7f6'},
     {key:'停班_假',  label:'2線(假)',  title:'停班2線（假日）',  bg:'#d1c4e9'}
   ];
@@ -3567,6 +3580,9 @@ function fpSlotActive(rowIdx, ci){
   var dow = wkm ? (wkMap[wkm[1]] !== undefined ? wkMap[wkm[1]] : -1) : -1;
   var isHol = holRows.length > 0 ? !!holRows[rowIdx] : (dow === 0 || dow === 6);
   if(isHol) return false; // 假日不排門診
+  // ver5.5：10~11月人力崗位變更——週五比照週四；注射2 加排週四(+週五)
+  var sp = !!(_fpPreviewData && _fpPreviewData.friAsThu);
+  if(sp && dow === 5) dow = 4;
   // ci=2 門診: 週二+週四
   if(ci === 2) return dow === 2 || dow === 4;
   // ci=3 掛號: 週四
@@ -3579,8 +3595,8 @@ function fpSlotActive(rowIdx, ci){
   if(ci === 6) return dow === 2 || dow === 4;
   // ci=7 注射1: 週二+週四
   if(ci === 7) return dow === 2 || dow === 4;
-  // ci=8 注射2: 週二
-  if(ci === 8) return dow === 2;
+  // ci=8 注射2: 週二（10~11月加週四/週五）
+  if(ci === 8) return dow === 2 || (sp && dow === 4);
   // ci=9 卡介苗/高齡認知: ver4.9 優先用後端 lTypes（BCG=首週二卡介苗、COG=其餘週二高齡認知）
   if(ci === 9){
     var lts = _fpPreviewData && _fpPreviewData.lTypes || [];
@@ -3624,6 +3640,7 @@ function fpCellStatsTip(name){
     var ds3 = (dates2[ri] && dates2[ri][0]) || '';
     var wm3 = ds3.match(/週([一二三四五六日])/);
     var dow3 = wm3 ? (wkMap3[wm3[1]] !== undefined ? wkMap3[wm3[1]] : -1) : -1;
+    if(_fpPreviewData.friAsThu && dow3===5) dow3 = 4;  // ver5.5：週五併週四桶
     for(var ci=0; ci<row.length; ci++){
       var v = row[ci];
       if(!v || v.toString().trim() !== name) continue;
@@ -4531,6 +4548,8 @@ function previewPendingSheet(sheetName){
         dengSwapDateMap: data.dengSwapDateMap || {},
         changes:     data.changes     || {},
         clinicStaff: data.clinicStaff || [],
+        // ver5.5：10~11月人力崗位變更旗標
+        octNovSpecial: !!data.octNovSpecial,
         // ver4.9：L欄業務類型＋資格池（審核預覽的拖曳/選人/統計用）
         cogActive:   !!data.cogActive,
         lTypes:      data.lTypes   || [],
