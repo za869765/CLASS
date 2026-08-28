@@ -1,5 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
+// ver5.5.1 - 10~11月加碼：前台關卡停排（12月恢復）
 // ver5.5 - 10~11月人力崗位變更（12月自動恢復）：D欄支援→掛號2(週四+週五)/注射2加排週四+週五/週五全面比照週四(排班+日別正名)/每欄每日別上限2→3；OCTNOV_SPECIAL_YMS 為唯一開關
 // ver5.4.2 - 班表提醒信格式優化（職務欄35%/個人化開頭+班別摘要/本人班別★標記/其他人員分隔）；5.4.2=依公務信箱診斷信實證定案：純屬性width="600"限寬(style勿帶寬度)+background-color全寫+bgcolor雙保險
 // =============================================
@@ -2035,10 +2036,12 @@ function shouldAssignShift(date, colIdx, year, month) {
   if (holiday) return false;
 
   // ver5.5：10~11月特別規則（優先於動態規則，12月起自動失效）
-  //   掛號2(原支援)/掛號/前台=週四＋週五；門診系列混合欄與注射2=週二＋週四＋週五
+  //   掛號2(原支援)/掛號=週四＋週五；門診系列混合欄與注射2=週二＋週四＋週五
+  //   ver5.5.1：前台(colIdx 4)關卡 10~11月停排
   if (isOctNovSpecial(year, month)) {
     switch(colIdx) {
-      case 1: case 3: case 4: return dow === 4 || dow === 5;
+      case 1: case 3: return dow === 4 || dow === 5;
+      case 4: return false;
       case 2: case 5: case 6: case 7: case 8: return dow === 2 || dow === 4 || dow === 5;
     }
   }
