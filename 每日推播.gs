@@ -101,28 +101,60 @@ function getWeatherDataCached() {
     globalWeatherCache     = data;
     globalWeatherCacheTime = now;
     // v6.4:持久備援(跨執行存活;失敗日可用前次成功資料)
+    // 記錄「台北曆日」而非只記時間戳,還原時才能對齊 day0=今天/day1=明天 的索引
     try {
+      var dateKey = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd');
       PropertiesService.getScriptProperties()
-        .setProperty('lastWeatherOk', JSON.stringify({ ts: now, data: data }));
+        .setProperty('lastWeatherOk', JSON.stringify({ ts: now, dateKey: dateKey, data: data }));
     } catch (e) { Logger.log("備援寫入失敗: " + e.toString()); }
     return data;
   }
 
-  // v6.4:3 次全失敗 → 讀 24 小時內的上次成功資料當備援
+  // v6.4:3 次全失敗 → 讀上次成功資料當備援(日期感知,避免跨日後 day0/day1 錯置)
+  //   同一台北曆日 → 直接用;差一天 → 用昨日資料的 day1(=今天)重建,明天以今天近似
+  //   差兩天以上 → 不用(寧缺勿錯)
   try {
     var raw = PropertiesService.getScriptProperties().getProperty('lastWeatherOk');
     if (raw) {
-      var backup = JSON.parse(raw);
-      if (backup && backup.data && (now - backup.ts) < 24 * 3600 * 1000) {
-        Logger.log("⚠️ API 全數失敗，改用 " + Math.round((now - backup.ts) / 3600000) + " 小時前的備援天氣資料");
+      var backup   = JSON.parse(raw);
+      var todayKey = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd');
+      if (backup && backup.data && backup.dateKey === todayKey) {
+        Logger.log("⚠️ API 全數失敗，改用今日稍早的備援天氣資料");
         globalWeatherCache     = backup.data;
         globalWeatherCacheTime = now;
         return backup.data;
       }
-      Logger.log("備援資料已超過 24 小時，不使用");
+      var ydayKey = Utilities.formatDate(new Date(now - 24 * 3600 * 1000), 'Asia/Taipei', 'yyyyMMdd');
+      if (backup && backup.data && backup.dateKey === ydayKey) {
+        Logger.log("⚠️ API 全數失敗，改用昨日備援資料的明日欄位當今日(明日以今日近似)");
+        var shifted = shiftBackupOneDay_(backup.data);
+        globalWeatherCache     = shifted;
+        globalWeatherCacheTime = now;
+        return shifted;
+      }
+      if (backup) Logger.log("備援資料日期 " + backup.dateKey + " 距今超過一天，不使用");
     }
   } catch (e) { Logger.log("備援讀取失敗: " + e.toString()); }
   return null;
+}
+
+// v6.4:昨日備援資料位移一天:day1(昨日視角的明天=今天)當 day0,明天暫以今天近似
+function shiftBackupOneDay_(d) {
+  function dup1(a) { return [a[1], a[1]]; }
+  var h24 = function(a) { var t = a.slice(24, 48); return t.concat(t); };
+  return {
+    daily: {
+      weather_code:       dup1(d.daily.weather_code),
+      temperature_2m_max: dup1(d.daily.temperature_2m_max),
+      temperature_2m_min: dup1(d.daily.temperature_2m_min),
+      sunrise:            dup1(d.daily.sunrise),
+      sunset:             dup1(d.daily.sunset)
+    },
+    hourly: {
+      precipitation_probability: h24(d.hourly.precipitation_probability),
+      uv_index:                  h24(d.hourly.uv_index)
+    }
+  };
 }
 
 // v6.4:只留推播實際用到的欄位(daily 全部 + 降雨機率/UV)，

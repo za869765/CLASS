@@ -609,6 +609,11 @@ textarea:focus{border-color:var(--accent)!important;background:#fff!important}
         每天安排，平日與假日分別排序，若遇值班衝突，系統會自動與最少換過的下一位平／假日調換，直到同日足兩個人力為止。
       </div>
 
+      <div style="background:#fff8e1;border:1.5px solid #ffb300;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;color:#e65100;margin-bottom:6px">🔀 115年10~11月人力崗位變更　<span style="font-size:.75rem;background:#e65100;color:#fff;border-radius:4px;padding:1px 7px">12月自動恢復</span></div>
+        「支援」改為「<b>掛號2</b>」（週四＋週五）；注射2 加排週四＋週五；<b>週五全面比照週四</b>（門診／掛號／前台／預登／注射全數照排，含週四日別正名）。每人每欄每日別上限放寬為 3 次。候選名單不變。
+      </div>
+
       <div style="background:#f5f5f5;border-radius:10px;padding:10px 14px;font-size:.8rem;color:#666">
         💡 若有人員請長假或特殊不排班，可在管理後台「🗓 自動排班 → 排班排除設定」中設定，系統會自動跳過該人員並由下一位遞補。
       </div>
@@ -3444,7 +3449,8 @@ function buildFpStats(){
   // ── 單次掃描計數（週別分欄）─────────────────────────────────────
   // 混合日欄（週二+週四）：ci=2(門診)/5(預登1)/6(預登2注)/7(注射1) → 加 (二)/(四) 後綴
   // 週四單日欄：ci=3(掛號)/4(前台)；週二單日欄：ci=8(注射2)；特殊：ci=9(卡介苗)
-  var MIX_CI = {2:true, 5:true, 6:true, 7:true};
+  // ver5.5：10~11月注射2(ci=8)加排週四/週五 → 也視為混合欄拆(二)/(四)
+  var MIX_CI = spStats ? {2:true, 5:true, 6:true, 7:true, 8:true} : {2:true, 5:true, 6:true, 7:true};
   var wkMap = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'日':0};
   preview.forEach(function(row, ri){
     var ds = (dates[ri]?dates[ri][0]:'')||'';
@@ -3501,7 +3507,11 @@ function buildFpStats(){
     {key:hPre2+'_四',  label:'預登2(四)',   title:'週四＝機動（癌篩協助或協助打針）', bg:'#80deea'},
     {key:hJab1+'_二',  label:'注射1(二)',   title:'週二＝兒童預防注射1', bg:'#fff9c4'},
     {key:hJab1+'_四',  label:'注射1(四)',   title:'週四＝成人疫苗注射1', bg:'#fff176'},
-    {key:hJab2,        label:'注射2',       title:'週二＝兒童預防注射2', bg:'#ffe082'},
+    // ver5.5：10~11月注射2拆(二)/(四)（週五併四）；其他月份單欄
+    ...(spStats
+      ? [{key:hJab2+'_二', label:'注射2(二)', title:'週二＝兒童預防注射2', bg:'#ffe082'},
+         {key:hJab2+'_四', label:'注射2(四)', title:'週四/週五＝成人疫苗注射2', bg:'#ffd54f'}]
+      : [{key:hJab2,       label:'注射2',     title:'週二＝兒童預防注射2', bg:'#ffe082'}]),
     // ver4.9 雙帳本：資格關卡 1 次顯示為加權分（生效月才加權，不追溯）
     {key:'卡介苗',     label:'卡介苗',      title:'卡介苗（首週二）'+(_fpUseW?'，1次計'+_fpFc.weightBcg+'分':''), bg:'#fce4ec', w:(_fpUseW?_fpFc.weightBcg:1)},
     {key:'高齡認知',   label:'高齡認知',    title:'高齡認知（其餘週二）'+(_fpUseW?'，1次計'+_fpFc.weightCog+'分':''), bg:'#b2dfdb', w:(_fpUseW?_fpFc.weightCog:1)}
