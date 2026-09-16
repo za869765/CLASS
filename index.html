@@ -1880,8 +1880,11 @@ function viewSched(){
         var origDate = dengSwapped ? (swapDateMap[String(i)] || swapDateMap[i] || '') : '';
         var origDay  = origDate ? origDate.replace(/^\d+\//, '') : '';
 
+        var hasExtra = (data.extraDates||[]).indexOf(dateOnly)!==-1;   // ver5.6：當日有加場 → 日期旁小圖示
         html+='<tr'+(isHoliday?' style="background:#fff3e0"':'')+'>'
-          +'<td'+(isHoliday?' style="color:#c62828;font-weight:700"':'')+'>'+x(rawDate)+'</td>';
+          +'<td style="white-space:nowrap'+(isHoliday?';color:#c62828;font-weight:700':'')+'">'+x(rawDate)
+          +(hasExtra?' <span class="ex-mark" data-exdate="'+x(dateOnly)+'" title="當日有加場／社區設站，點我看人力" style="cursor:pointer;font-size:.85em;background:#e0f2f1;border:1px solid #80cbc4;border-radius:10px;padding:0 5px;color:#00695c;vertical-align:middle">📍</span>':'')
+          +'</td>';
         row.forEach(function(cell,j){
           var shiftName=data.headers[j]||'';
           var key=dateOnly+'|'+shiftName;
@@ -1951,7 +1954,12 @@ function viewSched(){
 
       // ver5.6：加場人力按鈕只在該月有加場資料時顯示（試算表「加場設站」工作表）
       var exBtn = el('extraBtn');
-      if(exBtn) exBtn.style.display = (data.extraCount > 0) ? '' : 'none';
+      var _exDates = data.extraDates || [];
+      if(exBtn) exBtn.style.display = _exDates.length ? '' : 'none';
+      // 日期格小圖示：點擊開加場預覽並定位到該日
+      tbl.querySelectorAll('.ex-mark').forEach(function(m){
+        m.onclick=function(e){ e.preventDefault(); e.stopPropagation(); openExtraModal(m.getAttribute('data-exdate')); };
+      });
 
       // 審核中橫幅
       var banner = el('reviewBanner');
@@ -6716,7 +6724,9 @@ function buildMonthPreviewHtml(r){
 
 /* ── ver5.6 加場人力（假日／夜間加場／社區設站）預覽＋異動留言 ── */
 var _extraData = null;
-function openExtraModal(){
+var _extraFocusDate = '';
+function openExtraModal(focusDate){
+  _extraFocusDate = (typeof focusDate === 'string') ? focusDate : '';
   el('extraWrap').style.display='none';
   el('extraLoad').style.display='block'; el('extraLoad').textContent='🔄 載入中…';
   el('extraMonthLbl').textContent = selSheet ? '— '+selSheet : '';
@@ -6741,7 +6751,10 @@ function renderExtra(r){
     rows.forEach(function(row,i){
       var bg = i%2===0?'#fff':'#f1f8f6';
       var tag = /假日/.test(row.note)?'#c62828':(/社區/.test(row.note)?'#2e7d32':'#1565c0');
-      h += '<tr style="background:'+bg+'">'+cols.map(function(c){
+      var md = (row.date||'').split('（')[0];
+      var focus = _extraFocusDate && md === _extraFocusDate;
+      if(focus) bg = '#fff59d';
+      h += '<tr data-exmd="'+x(md)+'" style="background:'+bg+(focus?';outline:2px solid #f9a825':'')+'">'+cols.map(function(c){
         var v = x(row[c[0]]||'').replace(/\n/g,'<br>');
         var st = 'padding:6px 6px;border:1px solid #e0e0e0;vertical-align:middle;'+(c[0]==='time'||c[0]==='place'?'white-space:nowrap;text-align:left':'text-align:center');
         if(c[0]==='note') st += ';color:'+tag+';font-weight:700;white-space:nowrap';
@@ -6765,6 +6778,13 @@ function renderExtra(r){
   el('exStation').innerHTML = '<option value="">選擇關卡…</option>'+(r.stations||[]).map(function(s2){ return '<option value="'+x(s2)+'">'+x(s2)+'</option>'; }).join('');
   el('extraLoad').style.display='none';
   el('extraWrap').style.display='block';
+  // 由日期小圖示進來：預選該日並捲到該列
+  if(_extraFocusDate){
+    var fr = rows.filter(function(row){ return (row.date||'').split('（')[0] === _extraFocusDate; })[0];
+    if(fr) el('exDate').value = fr.dateKey;
+    var tr = el('extraTbl').querySelector('tr[data-exmd="'+_extraFocusDate+'"]');
+    if(tr && tr.scrollIntoView) setTimeout(function(){ tr.scrollIntoView({behavior:'smooth', block:'center'}); }, 100);
+  }
 }
 function submitExtraComment(){
   var dateKey = el('exDate').value, station = el('exStation').value;
