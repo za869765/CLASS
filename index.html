@@ -1949,6 +1949,10 @@ function viewSched(){
         tbl.onclick=null;
       }
 
+      // ver5.6：加場人力按鈕只在該月有加場資料時顯示（試算表「加場設站」工作表）
+      var exBtn = el('extraBtn');
+      if(exBtn) exBtn.style.display = (data.extraCount > 0) ? '' : 'none';
+
       // 審核中橫幅
       var banner = el('reviewBanner');
       if(banner) banner.style.display = isPending ? 'flex' : 'none';

@@ -873,6 +873,7 @@ function getScheduleData(sheetName) {
     holidayRows:     holidayRows,
     cogActive:       _ymForCog.valid ? isCognitiveActive(_ymForCog.year, _ymForCog.month) : false,
     octSpecial:      _ymForCog.valid ? isOctSpecial(_ymForCog.year, _ymForCog.month) : false,   // ver5.6
+    extraCount:      _ymForCog.valid ? countExtraSessions_(_ymForCog.year, _ymForCog.month) : 0,   // ver5.6：該月加場筆數（0=前端不顯示按鈕）
     lTypes:          lTypes,
     bcgStaff:        (function(){ try { return getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME).getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(n=>n&&n.toString().trim()).map(n=>n.toString().trim()); } catch(e){ return []; } })(),
     cogStaff:        getCogStaffNames(),
@@ -6452,6 +6453,21 @@ function parseExtraDate_(v, tz) {
   m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
   if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
   return null;
+}
+
+// 該月加場筆數（工作表不存在則 0，不自動建表）
+function countExtraSessions_(year, month) {
+  try {
+    const sh = getSpreadsheet().getSheetByName(EXTRA_SHEET_NAME);
+    if (!sh) return 0;
+    const lr = sh.getLastRow();
+    if (lr < 2) return 0;
+    const tz = getSpreadsheet().getSpreadsheetTimeZone();
+    return sh.getRange(2, 2, lr - 1, 3).getValues().filter(r => {
+      const d = parseExtraDate_(r[0], tz);
+      return d && r[2] && d.getFullYear() === year && d.getMonth() + 1 === month;
+    }).length;
+  } catch(e) { return 0; }
 }
 
 // 取得某月班表對應月份的加場清單＋留言
