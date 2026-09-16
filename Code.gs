@@ -2871,7 +2871,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         // ────────────────────────────────────────────────────────────
         // 協助掛號(1)：指針輪轉，排除遞補，可與值班/卡介苗重疊
         // ────────────────────────────────────────────────────────────
-        } else if (ci === 1) {
+        } else if (ci === 1 && !octThu) {   // ver5.6：十月週四 D 欄＝護理師掛號2，交給下方門診系列分支（K 欄池）
           const { name, nextPtr } = pickFromPtr(allKkStaff, kkPtr, d);
           rowRes[1] = name;
           kkPtr = nextPtr;
