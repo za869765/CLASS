@@ -1,7 +1,6 @@
 // =============================================
 // 智慧排班系統 2.0 - Code.gs (含自動排班模組)
-// ver5.5.1 - 10~11月加碼：前台關卡停排（12月恢復）
-// ver5.5 - 10~11月人力崗位變更（12月自動恢復）：D欄支援→掛號2(週四+週五)/注射2加排週四+週五/週五全面比照週四(排班+日別正名)/每欄每日別上限2→3；OCTNOV_SPECIAL_YMS 為唯一開關
+// ver5.6 - 十月疫苗季關卡新制（2026/10限定，欄位不擴、日別正名切換；場控前兩週固定；高齡認知10月暫停）＋加場設站預覽/留言＋審核寫入逐格合併
 // ver5.4.2 - 班表提醒信格式優化（職務欄35%/個人化開頭+班別摘要/本人班別★標記/其他人員分隔）；5.4.2=依公務信箱診斷信實證定案：純屬性width="600"限寬(style勿帶寬度)+background-color全寫+bgcolor雙保險
 // =============================================
 
@@ -177,27 +176,6 @@ function getFirstTuesdayWorkday(year, month) {
 }
 
 // =============================================
-// ver5.5 10~11月人力崗位變更（12月起自動恢復）
-// 內容：①D欄「支援」改「掛號2」（週四＋週五排班，J欄池不變）
-//       ②注射2 加排週四＋週五（原只排週二）
-//       ③週五全面比照週四：週四有排的門診系列崗位（門診/掛號/前台/預登1/
-//         預登2注/注射1/注射2/掛號2）週五照排，且沿用週四日別正名
-//       ④每人每欄每日別上限 2→3 次（HARD_CAP_PER_SLOT）
-// 12月起 OCTNOV_SPECIAL_YMS 不再命中，全部規則自動恢復原狀，勿手動改表
-// =============================================
-const OCTNOV_SPECIAL_YMS = new Set([202610, 202611]);
-
-function isOctNovSpecial(year, month) {
-  return OCTNOV_SPECIAL_YMS.has(year * 100 + month);
-}
-
-function isOctNovSpecialDate(dateObj) {
-  if (!dateObj) return false;
-  const d = new Date(dateObj);
-  return isOctNovSpecial(d.getFullYear(), d.getMonth() + 1);
-}
-
-// =============================================
 // ver4.9 高齡認知（L欄與卡介苗時間共用）
 // 規則：每月第一個工作週二=卡介苗(BCG)、其餘工作週二=高齡認知(COG)
 // 生效：2026年9月起，不追溯（之前的 L 欄一律視為卡介苗）
@@ -205,7 +183,57 @@ function isOctNovSpecialDate(dateObj) {
 const COG_EFFECTIVE_YM = 2026 * 100 + 9;   // 202609
 
 function isCognitiveActive(year, month) {
+  if (isOctSpecial(year, month)) return false;   // ver5.6：十月高齡認知暫停（只剩卡介苗）
   return (year * 100 + month) >= COG_EFFECTIVE_YM;
+}
+
+// =============================================
+// ver5.6 十月疫苗季關卡新制（2026/10 限定；11 月維持現行規則）
+// 欄位不擴，沿用 C~M，用「日別正名」切換（週二整體維持現行欄位規則）：
+//   D 支援    → 掛號2（一三五：J欄支援池；週四：K欄護理師）
+//   E 門診    → PRN（一三五）／PRN/門診（週四）／門診（週二照舊）
+//   F 掛號    → 掛號1（一三五：J欄支援池；週四：K欄護理師）
+//   G 前台    → 前台（僅週四，護理師；一三五由雪雲負責不進系統）
+//   H 預登1   → 查卡（一三四五）／預登1（週二照舊）
+//   I 預登2注 → 場控（一三四五；1~14 日固定 OCT_CTRL_FIXED，15 日起 K 欄輪流）／預登2注（週二照舊）
+//   J 注射1   → 打針1（一三四五）／注射1（週二）
+//   K 注射2   → 打針2（一三四五）／注射2（週二）
+//   L 卡介苗  → 首週二卡介苗照舊；高齡認知 10 月暫停
+// 統計：場控在看板獨立計數；十月所有關卡次數進公平帳；加場設站不計次數
+// =============================================
+const OCT_SPECIAL_YMS = new Set([202610]);
+const OCT_CTRL_FIXED  = { name: '陳翊瑄', untilDay: 14 };
+
+function isOctSpecial(year, month) { return OCT_SPECIAL_YMS.has(year * 100 + month); }
+function isOctSpecialDate(dateObj) {
+  if (!dateObj) return false;
+  const d = new Date(dateObj);
+  return isOctSpecial(d.getFullYear(), d.getMonth() + 1);
+}
+// 十月新制關卡日＝十月工作日且非週二
+function isOctVaxDay(dateObj) {
+  if (!dateObj) return false;
+  const d = new Date(dateObj);
+  if (!isOctSpecialDate(d) || isHoliday(d)) return false;
+  const dow = d.getDay();
+  return dow >= 1 && dow <= 5 && dow !== 2;
+}
+// 十月新制各欄日別資訊（ci 0-10）；非新制日回傳 null
+// { name:顯示名, pool:'J'(支援池)|'K'(護理師池), active:當日是否排班 }
+function octColInfo(ci0to10, dateObj) {
+  if (!isOctVaxDay(dateObj)) return null;
+  const thu = new Date(dateObj).getDay() === 4;
+  switch (ci0to10) {
+    case 1: return { name: '掛號2', pool: thu ? 'K' : 'J', active: true };
+    case 2: return { name: thu ? 'PRN/門診' : 'PRN', pool: 'K', active: true };
+    case 3: return { name: '掛號1', pool: thu ? 'K' : 'J', active: true };
+    case 4: return { name: '前台', pool: 'K', active: thu };
+    case 5: return { name: '查卡', pool: 'K', active: true };
+    case 6: return { name: '場控', pool: 'K', active: true };
+    case 7: return { name: '打針1', pool: 'K', active: true };
+    case 8: return { name: '打針2', pool: 'K', active: true };
+    default: return null;
+  }
 }
 
 // 判斷某日期 L 欄的業務類型：'BCG' | 'COG' | ''
@@ -237,10 +265,9 @@ function dayAliasName(ci0to10, dateObj, fallbackName) {
   if (!dateObj) return fallbackName;
   const d = new Date(dateObj);
   if (isHoliday(d)) return fallbackName;
-  let dow = d.getDay();
-  const octNov = isOctNovSpecialDate(d);
-  if (octNov && dow === 5) dow = 4;   // ver5.5：10~11月週五比照週四正名
-  if (octNov && ci0to10 === 1 && dow === 4) return '掛號2';  // ver5.5：D欄改名
+  const oc = octColInfo(ci0to10, d);   // ver5.6：十月新制日正名優先
+  if (oc) return oc.name;
+  const dow = d.getDay();
   if (dow === 4) {
     if (ci0to10 === 5) return '癌篩掛號';
     if (ci0to10 === 6) return '機動';
@@ -528,8 +555,8 @@ function getDaySchedule(spreadsheet, dateObj, timezone) {
         const lt = getLTypeForDate(dateObj);
         if (lt === 'COG') shiftName = '高齡認知';
         else if (lt === 'BCG') shiftName = '卡介苗';
-      } else if (ci === 1 || (ci >= 5 && ci <= 8)) {
-        // ver5.5：ci=1（D欄）10~11月改名掛號2；5~8 照舊日別正名（含週五比照週四）
+      } else if (ci >= 1 && ci <= 8) {
+        // ver5.6：D~K 欄一律走日別正名（十月新制／週四癌篩掛號等）
         shiftName = dayAliasName(ci, dateObj, shiftName);
       }
       duties.push({ shift: shiftName, person: val.toString().trim() });
@@ -845,7 +872,7 @@ function getScheduleData(sheetName) {
     writeCount:      writeCount,
     holidayRows:     holidayRows,
     cogActive:       _ymForCog.valid ? isCognitiveActive(_ymForCog.year, _ymForCog.month) : false,
-    octNovSpecial:   _ymForCog.valid ? isOctNovSpecial(_ymForCog.year, _ymForCog.month) : false,  // ver5.5
+    octSpecial:      _ymForCog.valid ? isOctSpecial(_ymForCog.year, _ymForCog.month) : false,   // ver5.6
     lTypes:          lTypes,
     bcgStaff:        (function(){ try { return getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME).getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['L']).getValues().flat().filter(n=>n&&n.toString().trim()).map(n=>n.toString().trim()); } catch(e){ return []; } })(),
     cogStaff:        getCogStaffNames(),
@@ -925,13 +952,14 @@ function getShiftOptions(column, dateStr, sheetName) {
   const sheet = getSpreadsheet().getSheetByName(EMAIL_SHEET_NAME);
   const columnLetter = String.fromCharCode(64 + column);
 
-  // ── D 欄（ver5.5）：10~11月改名「掛號2」，選人池不變（J欄）──
-  if (column === 4 && dateStr) {
-    const dObjD = parseDateFromSheet(dateStr.toString().split(' ')[0], sheetName || '');
-    const aliasD = dObjD ? dayAliasName(1, dObjD, '') : '';
-    if (aliasD) {
-      const optsD = sheet.getRange(GLOBAL_CONFIG.SHIFT_OPTIONS['D']).getValues().flat().filter(o => o);
-      return { options: optsD, selectType: 'SC', displayName: aliasD };
+  // ── ver5.6 十月新制：D~K 欄依日期回傳正名與對應池（一三五掛號1/2=支援池，其餘=護理師池）──
+  if (column >= 4 && column <= 11 && dateStr) {
+    const dObjO = parseDateFromSheet(dateStr.toString().split(' ')[0], sheetName || '');
+    const oc = dObjO ? octColInfo(column - 3, dObjO) : null;
+    if (oc) {
+      const rngO = GLOBAL_CONFIG.SHIFT_OPTIONS[oc.pool === 'J' ? 'D' : 'E'];
+      const optsO = sheet.getRange(rngO).getValues().flat().filter(o => o);
+      return { options: optsO, selectType: 'SC', displayName: oc.name };
     }
   }
 
@@ -1447,14 +1475,15 @@ function getYearlyClinicStats() {
 
     // 建立 13 欄的 counts 結構
     const wdCounts = {};
-    nurseNames.forEach(n => { wdCounts[n] = new Array(13).fill(0); });
+    nurseNames.forEach(n => { wdCounts[n] = new Array(14).fill(0); });   // ver5.6：+場控（idx 13）
     // ver4.9 雙帳本：資格班分項計數（bcg/cog 全年）＋生效後(9月起)計數（獎勵分基準，不追溯）
     const bcgCntAll = {}, cogCntAll = {}, bcgCntEff = {}, cogCntEff = {};
     nurseNames.forEach(n => { bcgCntAll[n]=0; cogCntAll[n]=0; bcgCntEff[n]=0; cogCntEff[n]=0; });
     const fairCfgStats = getFairnessConfig();
 
     // 原始欄 idx → 輸出欄 idx 的映射（L欄需另傳 lType）
-    function getOutIdx(srcIdx, dow, lType) {
+    function getOutIdx(srcIdx, dow, lType, octVax) {
+      if (octVax && srcIdx === 4) return 13;   // ver5.6：十月一三四五 I 欄＝場控，獨立計數
       if (srcIdx === 0) return dow === 2 ? 0 : (dow === 4 ? 1 : 0); // 門診
       if (srcIdx === 1) return 2;   // 掛號（週四）
       if (srcIdx === 2) return 3;   // 前台（週四）
@@ -1473,7 +1502,7 @@ function getYearlyClinicStats() {
       if (lr < 2) return;
       const maxRow = Math.min(lr, 32);
       // E到L欄（含卡介苗/高齡認知）；B 欄星期字串；A 欄日期（ver4.9 L欄類型判定用）
-      const data    = sh.getRange('E2:L' + maxRow).getValues();
+      const data    = sh.getRange('D2:L' + maxRow).getValues();   // ver5.6：含 D 欄（十月週四護理師掛號2）
       const wkData  = sh.getRange('B2:B' + maxRow).getValues();
       const dtData  = sh.getRange('A2:A' + maxRow).getValues();
       const pSheet  = parseYearMonthFromSheetName(sName);
@@ -1483,7 +1512,7 @@ function getYearlyClinicStats() {
       const mCounts = {};
       nurseNames.forEach(n => { mCounts[n] = new Array(8).fill(0); });
       const mWdCounts = {};
-      nurseNames.forEach(n => { mWdCounts[n] = new Array(13).fill(0); });
+      nurseNames.forEach(n => { mWdCounts[n] = new Array(14).fill(0); });
 
       // ver4.9（Codex review #3）：公平帳一律以「原始排班」計數——用換班日誌反推，
       // 與排班引擎同基準，換班屬個人協調不改變公平統計
@@ -1494,8 +1523,10 @@ function getYearlyClinicStats() {
         const wb  = wkData[ri][0] ? wkData[ri][0].toString() : '';
         const wm  = wb.match(/週([一二三四五六日])/);
         let dow = wm ? (wkMap[wm[1]] !== undefined ? wkMap[wm[1]] : -1) : -1;
-        // ver5.5：10~11月特別月的週五班次計入（四）欄位桶
-        if (pSheet.valid && isOctNovSpecial(pSheet.year, pSheet.month) && dow === 5) dow = 4;
+        // ver5.6：十月一三五併週四桶；I 欄＝場控
+        const shOct  = pSheet.valid && isOctSpecial(pSheet.year, pSheet.month);
+        const octVaxRow = shOct && dow >= 1 && dow <= 5 && dow !== 2;
+        if (octVaxRow) dow = 4;
         // 解析日期（L欄卡介苗/高齡認知判定＋原始排班 key）
         let pd = null;
         const rawA = dtData[ri][0];
@@ -1507,14 +1538,22 @@ function getYearlyClinicStats() {
         const lType = pd ? getLTypeForDate(pd) : '';
         const dsKey = pd ? ((pd.getMonth()+1) + '/' + pd.getDate()) : '';
 
+        // ver5.6：十月週四 D 欄（護理師掛號2）併入「掛號」計數
+        if (octVaxRow && dow === 4) {
+          const dRaw = row[0] ? row[0].toString().trim() : '';
+          const dVal = (dsKey && origMapY[dsKey + '|1']) || dRaw;
+          if (dVal && counts.hasOwnProperty(dVal)) {
+            counts[dVal][1]++; mCounts[dVal][1]++; wdCounts[dVal][2]++; mWdCounts[dVal][2]++;
+          }
+        }
         for (let ci = 0; ci < 8; ci++) {
-          // E:L 的 ci 0..7 對應班表 colIdx 2..9
-          const cellRaw = row[ci] ? row[ci].toString().trim() : '';
+          // E:L 的 ci 0..7 對應班表 colIdx 2..9（row 從 D 起，故 +1）
+          const cellRaw = row[ci + 1] ? row[ci + 1].toString().trim() : '';
           const val = (dsKey && origMapY[dsKey + '|' + (ci + 2)]) || cellRaw;
           if (!val || !counts.hasOwnProperty(val)) continue;
           counts[val][ci]++;
           mCounts[val][ci]++;
-          const oi = getOutIdx(ci, dow, lType);
+          const oi = getOutIdx(ci, dow, lType, octVaxRow);
           wdCounts[val][oi]++;
           mWdCounts[val][oi]++;
           // ver4.9：資格班分項計數
@@ -1697,13 +1736,14 @@ function getYearlyClinicStats() {
       (h[3]||'預登1')+'(二)', (h[3]||'預登1')+'(四)',
       (h[4]||'預登2注')+'(二)',(h[4]||'預登2注')+'(四)',
       (h[5]||'注射1')+'(二)', (h[5]||'注射1')+'(四)',
-      h[6]||'注射2',           '卡介苗',                '高齡認知'
+      h[6]||'注射2',           '卡介苗',                '高齡認知',
+      '場控'   // ver5.6：十月新制獨立計數
     ];
 
     // 將 wdCounts 轉為 rows 相同格式供前端使用
     const wdRows = rows.map(row => ({
       ...row,
-      wdCounts: wdCounts[row.name] || new Array(13).fill(0),
+      wdCounts: wdCounts[row.name] || new Array(14).fill(0),
       wdTotal:  (wdCounts[row.name] || []).reduce((s,v)=>s+v,0)
     }));
 
@@ -2035,15 +2075,10 @@ function shouldAssignShift(date, colIdx, year, month) {
   }
   if (holiday) return false;
 
-  // ver5.5：10~11月特別規則（優先於動態規則，12月起自動失效）
-  //   掛號2(原支援)/掛號=週四＋週五；門診系列混合欄與注射2=週二＋週四＋週五
-  //   ver5.5.1：前台(colIdx 4)關卡 10~11月停排
-  if (isOctNovSpecial(year, month)) {
-    switch(colIdx) {
-      case 1: case 3: return dow === 4 || dow === 5;
-      case 4: return false;
-      case 2: case 5: case 6: case 7: case 8: return dow === 2 || dow === 4 || dow === 5;
-    }
+  // ver5.6 十月新制（非週二工作日）：依 octColInfo 決定；週二維持現行規則
+  if (isOctSpecial(year, month) && dow !== 2) {
+    const oc = octColInfo(colIdx, date);
+    return oc ? oc.active : false;
   }
 
   // ★ 優先使用動態規則快取
@@ -2164,8 +2199,6 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     if (!sheet) return { success: false, message: '找不到工作表：' + sheetName };
 
     const { year, month } = parseYearMonthFromSheetName(sheetName);
-    // ver5.5：10~11月特別月份（週五比照週四=計數/輪序把週五併入週四桶；上限2→3）
-    const spMonth = isOctNovSpecial(year, month);
     const staffAll = getStaffList();
     // ★ 只保留本月在職人員（過濾已離職 & 尚未到職）
     const staff = staffAll.filter(s => isStaffActiveForMonth(s, year, month));
@@ -2182,6 +2215,17 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const fairCfg   = getFairnessConfig();
     const cogNames  = getCogStaffNames();
     const cogActive = isCognitiveActive(year, month);
+    // ver5.6：十月新制旗標＋工具（一三五併入「週四桶」計數；各欄依日期切換池）
+    const spMonth = isOctSpecial(year, month);
+    const octBucketDow = (dObj) => {
+      const dw = dObj.getDay();
+      return (spMonth && dw !== 2 && dw >= 1 && dw <= 5) ? 4 : dw;
+    };
+    const poolNamesFor = (ci, dObj) => {
+      const oc = (spMonth && dObj) ? octColInfo(ci, dObj) : null;
+      if (oc) return (oc.pool === 'J' ? (shiftStaffMap['D'] || []) : (shiftStaffMap['E'] || []));
+      return shiftStaffMap[cols[ci]] || [];
+    };
 
     const datesRange   = sheet.getRange('A2:B32').getValues();
     const existingData = sheet.getRange('C2:M32').getValues();
@@ -2437,8 +2481,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     //   修掉新人因累積=0被系統性超排的隱性補償）
     // ③一律以「原始排班」計數：用換班日誌反推（buildOriginalScheduleMap），
     //   換班屬個人協調不進公平帳
-    // ver5.5：10~11月 注射2(ci=8) 加排週四/週五 → 也視為混合日欄（週二/週四分桶輪序）
-    const MIXED_CIS = spMonth ? [2, 5, 6, 7, 8] : [2, 5, 6, 7];
+    // ver5.6：十月 D~K 全部視為混合日欄（週二 vs 一三四五 分桶）
+    const MIXED_CIS = spMonth ? [1, 2, 3, 4, 5, 6, 7, 8] : [2, 5, 6, 7];
     const TUE_THU_CIS = new Set(MIXED_CIS);
     const assignCountTue = {}; // 會在 try 內初始化
     const assignCountThu = {};
@@ -2480,8 +2524,9 @@ function runAutoSchedule(sheetName, adminPassword, options) {
 
         const origMap  = buildOriginalScheduleMap(wm.name);  // 換班日誌反推原始排班
         const dateCol  = s.getRange('A2:A' + maxRow).getValues();
-        const data     = s.getRange('E2:L' + maxRow).getValues(); // E..L = ci 2..9
+        const data     = s.getRange('D2:L' + maxRow).getValues(); // D..L = ci 1..9（ver5.6 含 D 欄）
         const ymNum    = wm.y * 100 + wm.m;
+        const wmOct    = isOctSpecial(wm.y, wm.m);
 
         data.forEach((row, ri) => {
           // 解析該列日期（原始排班反推需要 M/d key；dow 直接取自日期）
@@ -2495,12 +2540,12 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           if (!pd) return;
           const dateStr = Utilities.formatDate(pd, tz, 'M/d');
           let dow = pd.getDay();
-          // ver5.5：視窗月若為10~11月特別月，該月週五班次併入週四桶
-          if (isOctNovSpecial(wm.y, wm.m) && dow === 5) dow = 4;
+          if (wmOct && dow !== 2 && dow >= 1 && dow <= 5) dow = 4;   // ver5.6：十月一三五併週四桶
 
-          // ── E~K（ci 2-8）：原始排班計數 ──
-          for (let ci = 2; ci <= 8; ci++) {
-            const cellVal = row[ci - 2] ? row[ci - 2].toString().trim() : '';
+          // ── D~K（ci 1-8）：原始排班計數（D 欄只在十月週四＝護理師掛號2 才計）──
+          for (let ci = 1; ci <= 8; ci++) {
+            if (ci === 1 && !(wmOct && dow === 4)) continue;
+            const cellVal = row[ci - 1] ? row[ci - 1].toString().trim() : '';
             const val = origMap[dateStr + '|' + ci] || cellVal;
             if (!val || !assignCount[ci].hasOwnProperty(val)) continue;
             assignCount[ci][val]++;
@@ -2512,7 +2557,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           }
 
           // ── L欄（ci 9）：卡介苗/高齡認知 加權（2026/9起生效，不追溯）──
-          const lCell = row[7] ? row[7].toString().trim() : '';
+          const lCell = row[8] ? row[8].toString().trim() : '';
           const lVal  = origMap[dateStr + '|9'] || lCell;
           if (lVal && histFair.hasOwnProperty(lVal) && ymNum >= COG_EFFECTIVE_YM) {
             const lt = getLTypeForDate(pd);
@@ -2636,7 +2681,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     for (let r2 = 0; r2 < dateObjByRow.length; r2++) {
       const d2 = dateObjByRow[r2];
       if (!d2) continue;
-      for (let ci2 = 2; ci2 <= 8; ci2++) {
+      for (let ci2 = (spMonth ? 1 : 2); ci2 <= 8; ci2++) {
+        if (ci2 === 1 && !(isOctVaxDay(d2) && d2.getDay() === 4)) continue;   // 十月週四 D 欄才是護理師格
         if (shouldAssignShift(d2, ci2, year, month)) totalClinicSlots++;
       }
     }
@@ -2654,14 +2700,14 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     staff.forEach(s => { monthlyCogCount[s.name] = 0; monthlyQualScore[s.name] = 0; });
     // ★ 本月每欄次數計數器（每人每欄每月不可超過 2 次）
     const monthlyCountPerCi = {};
-    for (let ci3 = 2; ci3 <= 8; ci3++) {
+    for (let ci3 = 1; ci3 <= 8; ci3++) {
       monthlyCountPerCi[ci3] = {};
       staff.forEach(s => { monthlyCountPerCi[ci3][s.name] = 0; });
     }
     // ★ 混合日欄（週二+週四）分開月計，確保每人週二和週四各輪到一次
     const monthlyCountPerCiTue = {};
     const monthlyCountPerCiThu = {};
-    for (const ci3 of MIXED_CIS) {  // 門診/預登1/預登2注/注射1（10~11月含注射2）
+    for (const ci3 of MIXED_CIS) {  // 門診/預登1/預登2注/注射1（十月：D~K 全部）
       monthlyCountPerCiTue[ci3] = {};
       monthlyCountPerCiThu[ci3] = {};
       staff.forEach(s => {
@@ -2680,7 +2726,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         const dk = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
         const v0 = existingData[r][0] ? existingData[r][0].toString().trim() : '';
         if (v0) dutyByDate[dk] = v0;
-        for (let ci = 2; ci <= 10; ci++) {
+        for (let ci = 1; ci <= 10; ci++) {
           const val = existingData[r][ci] ? existingData[r][ci].toString().trim() : '';
           if (!val) continue;
           if (ci === 9) {
@@ -2697,10 +2743,9 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           if (assignCount[ci] && assignCount[ci].hasOwnProperty(val)) {
             assignCount[ci][val]++;
             // ★ 不覆蓋模式下，恢復週二/週四分開計數
-            //   ver5.5：dow_ex 提升宣告（原宣告在內層 block，下方混合日欄月計引用會 ReferenceError）
+            //   ver5.6：dow_ex 提升宣告（原宣告在內層 block，下方引用會 ReferenceError）＋十月分桶
             const d_ex = dateObjByRow[r];
-            let dow_ex = d_ex ? d_ex.getDay() : -1;
-            if (spMonth && dow_ex === 5) dow_ex = 4;  // ver5.5：週五併週四桶
+            const dow_ex = d_ex ? octBucketDow(d_ex) : -1;
             if (TUE_THU_CIS && TUE_THU_CIS.has(ci)) {
               if (dow_ex === 2 && assignCountTue[ci]) assignCountTue[ci][val] = (assignCountTue[ci][val]||0)+1;
               if (dow_ex === 4 && assignCountThu[ci]) assignCountThu[ci][val] = (assignCountThu[ci][val]||0)+1;
@@ -2720,7 +2765,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
     const colFutureDays    = {};  // 合計（用於非混合日欄）
     const colFutureDaysTue = {};  // 僅週二（用於混合日欄）
     const colFutureDaysThu = {};  // 僅週四（用於混合日欄）
-    for (let ci2 = 2; ci2 <= 8; ci2++) {
+    for (let ci2 = 1; ci2 <= 8; ci2++) {
       const days    = new Array(dateObjByRow.length).fill(0);
       const daysTue = new Array(dateObjByRow.length).fill(0);
       const daysThu = new Array(dateObjByRow.length).fill(0);
@@ -2729,8 +2774,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         const d2 = dateObjByRow[r2];
         if (d2 && shouldAssignShift(d2, ci2, year, month)) {
           cnt++;
-          let dw2 = d2.getDay();
-          if (spMonth && dw2 === 5) dw2 = 4;  // ver5.5：週五併週四桶
+          const dw2 = octBucketDow(d2);
           if (dw2 === 2) cntT++;
           if (dw2 === 4) cntH++;
         }
@@ -2763,7 +2807,10 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       // ★ 門診系列（ci=2-8）的處理順序依 rowIdx 輪轉
       //   確保補償人員（總次數最低者）不會每天都被分到同一個職務欄
       //   值班(0)、支援(1)、卡介苗(9) 維持固定順序
-      const clinicCols = [2, 3, 4, 5, 6, 7, 8];
+      // ver5.6 十月新制：週四 D 欄（掛號2）也是護理師格；一三五 D/F 由支援池指針在 ci=1 分支一次處理
+      const octVax = spMonth && d && isOctVaxDay(d);
+      const octThu = octVax && d.getDay() === 4;
+      const clinicCols = octThu ? [1, 2, 3, 4, 5, 6, 7, 8] : (octVax ? [2, 4, 5, 6, 7, 8] : [2, 3, 4, 5, 6, 7, 8]);
       const clinicStart = rowIdx % clinicCols.length;
       const rotatedClinic = [
         ...clinicCols.slice(clinicStart),
@@ -2774,15 +2821,20 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       const sortedClinic = rotatedClinic.slice().sort((a, b) => {
         const colA = cols[a];
         const colB = cols[b];
-        const namesA = shiftStaffMap[colA] || [];
-        const namesB = shiftStaffMap[colB] || [];
+        const namesA = poolNamesFor(a, d);
+        const namesB = poolNamesFor(b, d);
         const zeroA = namesA.filter(n => n && !isPersonExcluded(n, d, exclusions, year) &&
           ((monthlyCountPerCi[a] && monthlyCountPerCi[a][n]) || 0) === 0).length;
         const zeroB = namesB.filter(n => n && !isPersonExcluded(n, d, exclusions, year) &&
           ((monthlyCountPerCi[b] && monthlyCountPerCi[b][n]) || 0) === 0).length;
         return zeroB - zeroA; // 0次護理師多的欄先處理
       });
-      const processOrder = [0, 1, 9, ...sortedClinic];
+      // ver5.6：場控固定期（1~14 日）先排場控，避免固定人選被其他關卡搶走；週四 ci=1 已在 clinicCols 內
+      if (octVax && d.getDate() <= OCT_CTRL_FIXED.untilDay) {
+        const iCtrl = sortedClinic.indexOf(6);
+        if (iCtrl > 0) { sortedClinic.splice(iCtrl, 1); sortedClinic.unshift(6); }
+      }
+      const processOrder = octThu ? [0, 9, ...sortedClinic] : [0, 1, 9, ...sortedClinic];
 
       for (const ci of processOrder) {
 
@@ -2794,6 +2846,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             if (ci === 0) dutyByDate[dk] = ex;
             if (ci === 9) { bcgByDate[dk] = ex; clinicAssigned.add(ex); }
             if (ci >= 2 && ci <= 8) clinicAssigned.add(ex);
+            if (ci === 1 && octThu) clinicAssigned.add(ex);
             continue;
           }
         }
@@ -2801,7 +2854,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         if (!d || !shouldAssignShift(d, ci, year, month)) { rowRes[ci] = ''; continue; }
 
         const col    = cols[ci];
-        const cNames = shiftStaffMap[col] || [];
+        const cNames = poolNamesFor(ci, d);   // ver5.6：十月依日期切換池
         if (cNames.length === 0) { rowRes[ci] = ''; continue; }
 
         // ────────────────────────────────────────────────────────────
@@ -2821,6 +2874,20 @@ function runAutoSchedule(sheetName, adminPassword, options) {
           const { name, nextPtr } = pickFromPtr(allKkStaff, kkPtr, d);
           rowRes[1] = name;
           kkPtr = nextPtr;
+          // ver5.6 十月一三五：掛號1（F 欄）也由支援池出人，指針接續取下一位（與 D 欄不同人）
+          if (octVax && !octThu && name) {
+            let p2 = { name: '', nextPtr: kkPtr };
+            for (let a = 0; a < allKkStaff.length; a++) {
+              const idx2 = (kkPtr + a) % allKkStaff.length;
+              const cand = allKkStaff[idx2];
+              if (!cand || cand.name === name) continue;
+              if (isPersonExcluded(cand.name, d, exclusions, year)) continue;
+              p2 = { name: cand.name, nextPtr: (idx2 + 1) % allKkStaff.length };
+              break;
+            }
+            rowRes[3] = p2.name;
+            kkPtr = p2.nextPtr;
+          }
 
         // ────────────────────────────────────────────────────────────
         // 卡介苗/高齡認知(9)：首週二=卡介苗(Q欄嚴格輪序)、其餘週二=高齡認知(G欄資格池)
@@ -2903,9 +2970,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
         } else {
           // ★ 門診系列：次數最少者優先
           //   ★ 週二/週四分開輪序：週二日排週二次數少者優先，週四日排週四次數少者優先
-          //   ★ 每人每欄每月不可超過 2 次（per-ci monthly cap；10~11月放寬為 3）
-          let dow = d ? d.getDay() : -1;
-          if (spMonth && dow === 5) dow = 4;  // ver5.5：週五比照週四（計數/輪序同桶）
+          //   ★ 每人每欄每月不可超過 2 次（per-ci monthly cap）
+          const dow = d ? octBucketDow(d) : -1;   // ver5.6：十月一三五併週四桶
           const isMixedDayCol = TUE_THU_CIS && TUE_THU_CIS.has(ci);
 
           const pool = cNames
@@ -2919,7 +2985,13 @@ function runAutoSchedule(sheetName, adminPassword, options) {
               !isPersonExcluded(s.name, d, exclusions, year) &&
               !clinicAssigned.has(s.name)
             );
-          if (pool.length === 0) { rowRes[ci] = ''; continue; }
+          // ver5.6：場控固定期（1~14 日）指定人選（需在職、未排除、當日未排其他關卡）
+          let forcedCtrl = '';
+          if (octVax && ci === 6 && d.getDate() <= OCT_CTRL_FIXED.untilDay) {
+            const fs = staff.find(s => s.name === OCT_CTRL_FIXED.name);
+            if (fs && !isPersonExcluded(fs.name, d, exclusions, year) && !clinicAssigned.has(fs.name)) forcedCtrl = fs.name;
+          }
+          if (pool.length === 0 && !forcedCtrl) { rowRes[ci] = ''; continue; }
 
           const dayPhase = (rowIdx * (ci + 1)) % Math.max(cNames.length, 1);
 
@@ -2954,8 +3026,13 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             return (monthlyCountPerCi[ci] && monthlyCountPerCi[ci][name]) || 0;
           };
 
-          // 此欄此日的 hard cap（≤2），防止極端集中；ver5.5：10~11月週五加入班次變多，放寬為 3
-          const HARD_CAP_PER_SLOT = spMonth ? 3 : 2;
+          // 此欄此日的 hard cap（≤2），防止極端集中
+          // ver5.6 十月：格數暴增，改動態上限＝該欄該日別總格數 ÷ 池人數（進位）＋1
+          let HARD_CAP_PER_SLOT = 2;
+          if (spMonth) {
+            const totSlots = ((dow === 2 ? colFutureDaysTue[ci] : colFutureDaysThu[ci]) || [0])[0] || 0;
+            HARD_CAP_PER_SLOT = Math.ceil(totSlots / Math.max(cNames.length, 1)) + 1;
+          }
           const finalPool = pool.filter(p => getPerCiDay(p.name) < HARD_CAP_PER_SLOT);
           const effectivePool = finalPool.length > 0 ? finalPool : pool;
 
@@ -2998,7 +3075,8 @@ function runAutoSchedule(sheetName, adminPassword, options) {
             return ra - rb;
           });
           const finalPoolRef = effectivePool;
-          const chosen = finalPoolRef[0].name;
+          const chosen = forcedCtrl || (finalPoolRef[0] ? finalPoolRef[0].name : '');
+          if (!chosen) { rowRes[ci] = ''; continue; }
           rowRes[ci] = chosen;
           assignCount[ci][chosen] = (assignCount[ci][chosen] || 0) + 1;
           // ★ 同步更新週二/週四分開計數器
@@ -3289,7 +3367,7 @@ function runAutoSchedule(sheetName, adminPassword, options) {
       dengSwapDateMap: dengSwapDateMap,
       clinicStaff:     Array.from(clinicStaffSet),
       cogActive:       cogActive,
-      octNovSpecial:   spMonth,   // ver5.5：10~11月人力崗位變更旗標（前端週五格/名稱用）
+      octSpecial:      spMonth,   // ver5.6
       lTypes:          lTypes,
       bcgStaff:        (shiftStaffMap['L'] || []).filter(Boolean),
       cogStaff:        cogNames,
@@ -4224,8 +4302,8 @@ function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
           const lt = getLTypeForDate(rowDObj);
           if (lt === 'COG') hdr = '高齡認知';
           else if (lt === 'BCG') hdr = '卡介苗';
-        } else if (ci === 3 || (ci >= 7 && ci <= 10)) {
-          // D(3)支援→掛號2(10~11月)；H(7)預登1/I(8)預登2注/J(9)注射1/K(10)注射2：日別正名
+        } else if (ci >= 3 && ci <= 10) {
+          // D(3)~K(10)：日別正名（十月新制／週四癌篩掛號等）
           hdr = dayAliasName(ci - 2, rowDObj, hdr);
         }
         shifts.push({ header: hdr, value: val });
@@ -4242,7 +4320,14 @@ function lineSearchSchedule(keyword, sheetNames, fuzzy, searchColIndices) {
 const LINE_SHIFT_STYLE = {
   '值班':      { icon: '👤', color: '#E74C3C' },
   '協助掛號':  { icon: '📋', color: '#3498DB' },
+  '掛號1':     { icon: '📋', color: '#3498DB' },
   '掛號2':     { icon: '📋', color: '#3498DB' },
+  '場控':      { icon: '🎯', color: '#2C3E50' },
+  'PRN':       { icon: '🩺', color: '#9B59B6' },
+  'PRN/門診':  { icon: '🩺', color: '#9B59B6' },
+  '查卡':      { icon: '🪪', color: '#27AE60' },
+  '打針1':     { icon: '💉', color: '#F39C12' },
+  '打針2':     { icon: '💉', color: '#F39C12' },
   '門診':      { icon: '🏥', color: '#9B59B6' },
   '流注1':     { icon: '💉', color: '#E67E22' },
   '流注2':     { icon: '💉', color: '#E67E22' },
@@ -6154,7 +6239,8 @@ function writeDragShiftLog(sheetName, arrangerEmpId, logs) {
 
 // ── 寫入已拖曳調整的預覽資料（直接覆蓋排班欄 C:M）──────────────────
 // previewRows: [[col0..col10], ...] 同 runAutoSchedule 的 result 格式
-function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
+// baseRows（ver5.6 移植 5.5.2，選填）：前端開審核預覽當下讀到的試算表 C2:M32 快照；有傳才做逐格合併
+function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo, baseRows) {
   if (!verifyAdminPassword(adminPassword)) return { success: false, message: '管理員密碼錯誤。' };
   try {
     const spreadsheet = getSpreadsheet();
@@ -6171,6 +6257,27 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
       while (r.length < 11) r.push('');
       return r.map(function(v){ return v == null ? '' : v; });
     });
+
+    // ★ 審核寫入逐格合併——只覆寫審核者真的動過的格子，其餘沿用試算表現值。
+    //   原本整表以預覽快照覆蓋：審核者開預覽後、按「確認寫入」前，同仁在前台完成的換班會被舊快照蓋回。
+    //   baseRows = 前端開預覽當下的試算表內容；某格 preview===base 代表審核者沒動它。
+    let mergedKeep = 0;
+    const conflicts = [];
+    if (Array.isArray(baseRows) && baseRows.length === rows.length) {
+      const cur  = sheet.getRange(2, 3, rows.length, 11).getValues();
+      const dCol = sheet.getRange(2, 1, rows.length, 1).getDisplayValues();
+      const hdrs = sheet.getRange('C1:M1').getDisplayValues()[0];
+      const sv = v => (v == null ? '' : String(v)).trim();
+      for (let i = 0; i < rows.length; i++) {
+        const b = Array.isArray(baseRows[i]) ? baseRows[i] : [];
+        for (let j = 0; j < 11; j++) {
+          const curV = sv(cur[i][j]), baseV = sv(b[j]), newV = sv(rows[i][j]);
+          if (curV === baseV) continue;                          // 期間沒人動過此格
+          if (newV === baseV) { rows[i][j] = cur[i][j]; mergedKeep++; }  // 審核者沒動 → 保留他人換班
+          else conflicts.push(`${dCol[i][0]} ${hdrs[j]}（他人已換為 ${curV||'空'}，以審核版 ${newV||'空'} 覆寫）`);
+        }
+      }
+    }
 
     sheet.getRange('A2:A32').setNumberFormat('@');
     sheet.getRange(2, 3, rows.length, 11).setValues(rows); // C2:M(2+n)
@@ -6237,10 +6344,14 @@ function writeDraggedPreview(sheetName, adminPassword, previewRows, swapInfo) {
     sheet.getRange('N1').setNote(newNote);
     sheet.getRange('N1').setValue(sheetName + '　' + letter);
 
-    writeOpLog('排班寫入（拖曳調整）', `${sheetName} 寫入 ${rows.length} 列，swap ${swapKeys.length} 筆`);
+    let mergeMsg = '';
+    if (mergedKeep > 0) mergeMsg += `（期間他人換班 ${mergedKeep} 格已保留）`;
+    if (conflicts.length > 0) mergeMsg += `\n⚠️ 衝突 ${conflicts.length} 格以審核版為準：` + conflicts.join('；');
+    writeOpLog('排班寫入（拖曳調整）', `${sheetName} 寫入 ${rows.length} 列，swap ${swapKeys.length} 筆`
+      + (mergedKeep > 0 || conflicts.length > 0 ? `，合併保留 ${mergedKeep} 格，衝突 ${conflicts.length} 格` : ''));
     return {
       success: true,
-      message: `${sheetName} 排班完成（含拖曳調整）！（共 ${rows.length} 天）`,
+      message: `${sheetName} 排班完成（含拖曳調整）！（共 ${rows.length} 天）` + mergeMsg,
       writeLetter: letter
     };
     }, () => ({ success: false, message: '⏳ 系統忙碌中（多人同時操作），請稍後再試。' }));
@@ -6297,4 +6408,113 @@ function saveShiftDayRules(adminPassword, rules) {
   } catch(e) {
     return { success: false, message: e.message };
   }
+}
+
+// =============================================
+// ver5.6 加場設站（假日／夜間加場／社區設站）預覽與留言
+// 工作表「加場設站」：A~K 資料（備註/日期/時間/地點/場控/前台/掛號/填單/引導/疫苗注射/支援）
+//                     M~S 留言（留言時間/留言者/日期/關卡/原人員/新人員/備註）
+// 純紀錄，不進任何次數／公平帳；資料由管理者手動維護，首次開啟自動建表並填入初始資料
+// =============================================
+const EXTRA_SHEET_NAME = '加場設站';
+const EXTRA_HEADERS = ['備註','日期','時間','地點','場控','前台','掛號','填單','引導','疫苗注射','支援'];
+const EXTRA_COMMENT_HEADERS = ['留言時間','留言者','日期','關卡','原人員','新人員','備註'];
+const EXTRA_INIT_ROWS = [
+  ['所內夜診','2026/10/2','16:00-19:00','佳里區衛生所','翊瑄','志工','瑞培、兆鑫','伶雯、志工','志工','佳卉、錦慧','詩瑋'],
+  ['假日(+子抹)','2026/10/9','08:30-11:30','佳里區衛生所','翊瑄','志工','瑞培、聖捷','晏筑、志工','沛汝(子抹)、志工','詩瑋、錦慧',''],
+  ['社區','2026/10/21','14:00-15:00\n15:30-16:30','民安社區活動中心\n子龍社區發展協會','佡蓁','翊瑄','兆鑫','沛汝','晏筑','伶雯、詩瑋',''],
+  ['假日','2026/10/26','08:30-09:00\n09:30-10:30\n11:00-12:00','永興宮\n佳福寺\n佳化社區活動中心','翊瑄','錦慧','兆鑫','佡蓁','詩瑋','佳卉、伶雯',''],
+  ['社區','2026/10/28','14:00-15:00\n15:30-16:30','震興宮\n興化社區活動中心','翊瑄','伶雯','聖捷','瑞培','佳卉','沛汝、晏筑',''],
+  ['社區','2026/11/4','13:30-14:30\n15:00-16:00\n16:30-17:00','漳洲海澄社區活動中心\n頂廊社區活動中心\n嘉福里活動中心','翊瑄','晏筑','聖捷','佳卉','兆鑫','佡蓁、詩瑋',''],
+  ['社區','2026/11/11','09:00-09:30\n10:00-10:30\n11:00-11:30','龍安社區活動中心\n蚶寮社區活動中心\n通興社區活動中心','翊瑄','沛汝','瑞培','晏筑','錦慧','佡蓁、詩瑋','']
+];
+
+function ensureExtraSheet_() {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName(EXTRA_SHEET_NAME);
+  if (sh) return sh;
+  sh = ss.insertSheet(EXTRA_SHEET_NAME);
+  sh.getRange(1, 1, 1, EXTRA_HEADERS.length).setValues([EXTRA_HEADERS]).setFontWeight('bold').setBackground('#fff59d');
+  sh.getRange(1, 13, 1, EXTRA_COMMENT_HEADERS.length).setValues([EXTRA_COMMENT_HEADERS]).setFontWeight('bold').setBackground('#bbdefb');
+  sh.getRange('B2:B200').setNumberFormat('@');
+  sh.getRange(2, 1, EXTRA_INIT_ROWS.length, EXTRA_HEADERS.length).setValues(EXTRA_INIT_ROWS);
+  sh.setColumnWidth(3, 110); sh.setColumnWidth(4, 180);
+  writeOpLog('加場設站', '首次開啟自動建立工作表並填入 ' + EXTRA_INIT_ROWS.length + ' 筆初始資料');
+  return sh;
+}
+
+function parseExtraDate_(v, tz) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  const s = v.toString().trim();
+  let m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[1]) - 1, parseInt(m[2]));
+  return null;
+}
+
+// 取得某月班表對應月份的加場清單＋留言
+function getExtraSessions(sheetName) {
+  try {
+    const sh = ensureExtraSheet_();
+    const tz = getSpreadsheet().getSpreadsheetTimeZone();
+    const ym = parseYearMonthFromSheetName(sheetName || '');
+    const lr = Math.max(sh.getLastRow(), 1);
+    const rows = [], comments = [];
+    const WD = ['日','一','二','三','四','五','六'];
+    if (lr >= 2) {
+      const data = sh.getRange(2, 1, lr - 1, 19).getValues();   // A..S
+      data.forEach(r => {
+        const d = parseExtraDate_(r[1], tz);
+        if (d && r[3] && (!ym.valid || (d.getFullYear() === ym.year && d.getMonth() + 1 === ym.month))) {
+          rows.push({
+            note: r[0] ? r[0].toString() : '',
+            date: Utilities.formatDate(d, tz, 'M/d') + '（週' + WD[d.getDay()] + '）',
+            dateKey: Utilities.formatDate(d, tz, 'yyyy/M/d'),
+            time: r[2] ? r[2].toString() : '', place: r[3] ? r[3].toString() : '',
+            ctrl: r[4] ? r[4].toString() : '', front: r[5] ? r[5].toString() : '',
+            reg: r[6] ? r[6].toString() : '', form: r[7] ? r[7].toString() : '',
+            guide: r[8] ? r[8].toString() : '', inject: r[9] ? r[9].toString() : '',
+            support: r[10] ? r[10].toString() : ''
+          });
+        }
+        const cd = parseExtraDate_(r[14], tz);
+        if (r[12] && cd && (!ym.valid || (cd.getFullYear() === ym.year && cd.getMonth() + 1 === ym.month))) {
+          comments.push({
+            time: r[12] instanceof Date ? Utilities.formatDate(r[12], tz, 'yyyy/MM/dd HH:mm') : r[12].toString(),
+            who: r[13] ? r[13].toString() : '',
+            date: Utilities.formatDate(cd, tz, 'M/d'),
+            station: r[15] ? r[15].toString() : '',
+            oldName: r[16] ? r[16].toString() : '', newName: r[17] ? r[17].toString() : '',
+            remark: r[18] ? r[18].toString() : ''
+          });
+        }
+      });
+    }
+    rows.sort((a, b) => a.dateKey.split('/').map(Number).reduce((x,y)=>x*100+y,0) - b.dateKey.split('/').map(Number).reduce((x,y)=>x*100+y,0));
+    return { success: true, rows, comments: comments.reverse(), stations: EXTRA_HEADERS.slice(4) };
+  } catch(e) { return { success: false, message: e.message, rows: [], comments: [] }; }
+}
+
+// 留言：哪天、什麼關卡、誰換成誰（需員工編號驗證；純紀錄不改動加場表）
+function addExtraSessionComment(empId, c) {
+  if (!verifyEmpId(empId)) return { success: false, message: '員工編號驗證失敗。' };
+  if (!c || !c.dateKey || !c.station) return { success: false, message: '請選擇日期與關卡。' };
+  try {
+    return withScriptLock(8000, () => {
+      const sh = ensureExtraSheet_();
+      const tz = getSpreadsheet().getSpreadsheetTimeZone();
+      const who = resolveEmpIdToName(empId) || empId;
+      const colM = sh.getRange('M2:M500').getValues();
+      let row = 2;
+      for (let i = 0; i < colM.length; i++) { if (!colM[i][0]) { row = i + 2; break; } }
+      const ts = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
+      sh.getRange(row, 13, 1, 7).setValues([[ts, who, c.dateKey, c.station,
+        (c.oldName || '').toString().trim(), (c.newName || '').toString().trim(),
+        (c.remark || '').toString().trim().split('\n').join(' ')]]);
+      writeOpLog('加場留言', `${who} ${c.dateKey} ${c.station} ${c.oldName||'–'}→${c.newName||'–'}`);
+      return { success: true, message: '留言已記錄。' };
+    }, () => ({ success: false, message: '⏳ 系統忙碌中，請稍後再試。' }));
+  } catch(e) { return { success: false, message: '留言失敗：' + e.message }; }
 }
