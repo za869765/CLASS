@@ -193,7 +193,7 @@ function isCognitiveActive(year, month) {
 //   D 支援    → 掛號2（一三五：J欄支援池；週四：K欄護理師）
 //   E 門診    → PRN（一三五）／PRN/門診（週四）／門診（週二照舊）
 //   F 掛號    → 掛號1（一三五：J欄支援池；週四：K欄護理師）
-//   G 前台    → 前台（僅週四，護理師；一三五由雪雲負責不進系統）
+//   G 前台    → 前台（一三四五皆排，護理師）
 //   H 預登1   → 查卡（一三四五）／預登1（週二照舊）
 //   I 預登2注 → 場控（一三四五；1~14 日固定 OCT_CTRL_FIXED，15 日起 K 欄輪流）／預登2注（週二照舊）
 //   J 注射1   → 打針1（一三四五）／注射1（週二）
@@ -227,7 +227,7 @@ function octColInfo(ci0to10, dateObj) {
     case 1: return { name: '掛號2', pool: thu ? 'K' : 'J', active: true };
     case 2: return { name: thu ? 'PRN/門診' : 'PRN', pool: 'K', active: true };
     case 3: return { name: '掛號1', pool: thu ? 'K' : 'J', active: true };
-    case 4: return { name: '前台', pool: 'K', active: thu };
+    case 4: return { name: '前台', pool: 'K', active: true };   // ver5.6.1：一三五也排前台（護理師）
     case 5: return { name: '查卡', pool: 'K', active: true };
     case 6: return { name: '場控', pool: 'K', active: true };
     case 7: return { name: '打針1', pool: 'K', active: true };
